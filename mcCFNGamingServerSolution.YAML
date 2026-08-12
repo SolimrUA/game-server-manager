@@ -756,16 +756,25 @@ Resources:
       AllowedOAuthScopes: 
         - openid
         - aws.cognito.signin.user.admin
-      CallbackURLs: 
-        - !Sub https://${mcCloudFront.DomainName}/signed_in.html     
-      DefaultRedirectURI: !Sub https://${mcCloudFront.DomainName}/signed_in.html
-      ExplicitAuthFlows: 
+      CallbackURLs:
+        - !If
+          - FrontEndDomainIsSet
+          - !Sub https://${FrontEndDomain}/signed_in.html
+          - !Sub https://${mcCloudFront.DomainName}/signed_in.html
+      DefaultRedirectURI: !If
+        - FrontEndDomainIsSet
+        - !Sub https://${FrontEndDomain}/signed_in.html
+        - !Sub https://${mcCloudFront.DomainName}/signed_in.html
+      ExplicitAuthFlows:
         - ALLOW_REFRESH_TOKEN_AUTH
         - ALLOW_USER_SRP_AUTH
         - ALLOW_CUSTOM_AUTH
       GenerateSecret: false
-      LogoutURLs: 
-        - !Sub https://${mcCloudFront.DomainName}/logout.html
+      LogoutURLs:
+        - !If
+          - FrontEndDomainIsSet
+          - !Sub https://${FrontEndDomain}/logout.html
+          - !Sub https://${mcCloudFront.DomainName}/logout.html
       PreventUserExistenceErrors: ENABLED
       SupportedIdentityProviders: 
         - COGNITO
@@ -885,6 +894,60 @@ Resources:
                     ]
                   }
               - hostedZone: !Ref HostedZoneId          
+
+  mcAcmCertLambdaIamRole:
+    Type: 'AWS::IAM::Role'
+    Condition: FrontEndDomainIsSet
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Description: Execution role for the ACM DNS-validated certificate custom resource
+      Path: /service-role/
+      Policies:
+        - PolicyName: mcAcmCertInline
+          PolicyDocument:
+            !Sub
+              - |
+                  {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                      {
+                        "Effect": "Allow",
+                        "Action": [
+                          "logs:CreateLogGroup",
+                          "logs:CreateLogStream",
+                          "logs:PutLogEvents"
+                        ],
+                        "Resource": "*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": [
+                          "acm:RequestCertificate",
+                          "acm:DescribeCertificate",
+                          "acm:DeleteCertificate",
+                          "acm:AddTagsToCertificate"
+                        ],
+                        "Resource": "*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "route53:ChangeResourceRecordSets",
+                        "Resource": "arn:aws:route53:::hostedzone/${hostedZone}"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "route53:GetChange",
+                        "Resource": "*"
+                      }
+                    ]
+                  }
+              - hostedZone: !Ref HostedZoneId
 
   mcStartStopLambdaIamRole:
     Type: 'AWS::IAM::Role'
@@ -1189,6 +1252,81 @@ Resources:
       Runtime: python3.8
       Timeout: 10
 
+  mcAcmCertificateLambda:
+    Type: AWS::Lambda::Function
+    Condition: FrontEndDomainIsSet
+    Properties:
+      Code:
+        ZipFile: |
+          import time
+          import boto3
+          import cfnresponse
+          def lambda_handler(event, context):
+              props = event['ResourceProperties']
+              domain = props['DomainName']
+              hostedZoneId = props['HostedZoneId']
+              acm = boto3.client('acm', region_name='us-east-1')
+              route53 = boto3.client('route53')
+              physicalId = event.get('PhysicalResourceId', domain)
+              try:
+                  if event['RequestType'] == 'Delete':
+                      if physicalId.startswith('arn:'):
+                          try:
+                              acm.delete_certificate(CertificateArn=physicalId)
+                          except Exception as e:
+                              print(e)
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=physicalId)
+                      return
+                  if event['RequestType'] == 'Create':
+                      response = acm.request_certificate(
+                          DomainName=domain,
+                          ValidationMethod='DNS',
+                          Tags=[{'Key': 'Name', 'Value': domain}]
+                      )
+                      certArn = response['CertificateArn']
+
+                      record = None
+                      for attempt in range(10):
+                          description = acm.describe_certificate(CertificateArn=certArn)
+                          options = description['Certificate'].get('DomainValidationOptions', [])
+                          if options and options[0].get('ResourceRecord'):
+                              record = options[0]['ResourceRecord']
+                              break
+                          time.sleep(5)
+                      if not record:
+                          raise Exception('Timed out waiting for ACM to generate the DNS validation record')
+
+                      route53.change_resource_record_sets(
+                          HostedZoneId=hostedZoneId,
+                          ChangeBatch={
+                              'Changes': [{
+                                  'Action': 'UPSERT',
+                                  'ResourceRecordSet': {
+                                      'Name': record['Name'],
+                                      'Type': record['Type'],
+                                      'TTL': 300,
+                                      'ResourceRecords': [{'Value': record['Value']}]
+                                  }
+                              }]
+                          }
+                      )
+
+                      waiter = acm.get_waiter('certificate_validated')
+                      waiter.wait(CertificateArn=certArn, WaiterConfig={'Delay': 20, 'MaxAttempts': 40})
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {'CertificateArn': certArn}, physicalResourceId=certArn)
+                      return
+                  # Update - domain names are immutable on this resource, nothing to do
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'CertificateArn': physicalId}, physicalResourceId=physicalId)
+              except Exception as e:
+                  print(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': str(e)}, physicalResourceId=physicalId)
+      Description: Custom resource lambda to request and DNS-validate an ACM certificate for the front-end CloudFront distribution
+      Role: !GetAtt mcAcmCertLambdaIamRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Timeout: 900
+
   mcStartStopLambda:
     Type: 'AWS::Lambda::Function'
     DependsOn: mcCopyLambdaFiles
@@ -1284,18 +1422,30 @@ Resources:
 
   mcOriginAccessId:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
-    Properties: 
-      CloudFrontOriginAccessIdentityConfig: 
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
         Comment: Origin Access ID for front end control site
+
+  mcAcmCertificate:
+    Type: Custom::AcmCertificate
+    Condition: FrontEndDomainIsSet
+    Properties:
+      ServiceToken: !GetAtt mcAcmCertificateLambda.Arn
+      DomainName: !Ref FrontEndDomain
+      HostedZoneId: !Ref HostedZoneId
 
   mcCloudFront:
     Type: AWS::CloudFront::Distribution
     DependsOn: mcCopyFrontEndFiles
-    Properties: 
-      DistributionConfig: 
+    Properties:
+      DistributionConfig:
+        Aliases: !If
+          - FrontEndDomainIsSet
+          - - !Ref FrontEndDomain
+          - !Ref AWS::NoValue
         Comment: Gaming server control centre
-        DefaultCacheBehavior: 
-          AllowedMethods: 
+        DefaultCacheBehavior:
+          AllowedMethods:
             - GET
             - HEAD
             - OPTIONS
@@ -1306,18 +1456,22 @@ Resources:
         Enabled: True
         HttpVersion: http2
         IPV6Enabled: true
-        Logging: 
+        Logging:
           Bucket: !GetAtt mcLoggingBucket.DomainName
           IncludeCookies: True
           Prefix: mcCloudFrontLogs/
-        Origins: 
-            - DomainName: !Sub ${mcS3Bucket}.s3.${AWS::Region}.amazonaws.com 
+        Origins:
+            - DomainName: !Sub ${mcS3Bucket}.s3.${AWS::Region}.amazonaws.com
               Id: mcCloudFrontS3OriginID
-              S3OriginConfig: 
+              S3OriginConfig:
                 OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${mcOriginAccessId}
         PriceClass: PriceClass_100
-        ViewerCertificate: 
-            CloudFrontDefaultCertificate: True
+        ViewerCertificate: !If
+          - FrontEndDomainIsSet
+          - AcmCertificateArn: !GetAtt mcAcmCertificate.CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: True
 
   mcFrontEndRoute53Alias:
     Type: AWS::Route53::RecordSet
@@ -1539,7 +1693,10 @@ Resources:
       ServiceToken: !GetAtt mcUpdateConfigLambda.Arn
       configfile: js/config.js
       S3Bucket: !Ref mcS3Bucket
-      cloudfrontURL: !Sub https://${mcCloudFront.DomainName}
+      cloudfrontURL: !If
+        - FrontEndDomainIsSet
+        - !Sub https://${FrontEndDomain}
+        - !Sub https://${mcCloudFront.DomainName}
       cognitoclientid: !Ref mcCognitoAppClient
       cognitodomain: !Sub ${mcUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
       apiurl: !Sub https://${mcControlApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
@@ -1568,8 +1725,15 @@ Outputs:
     Value: !Ref mcCognitoUserPool
   
   mcCloudfrontUrl:
-    Description: The default domain of your control website.  Note you can update this to be a CNAME of your custom domain. 
+    Description: The default CloudFront domain for your control website.
     Value: !Sub https://${mcCloudFront.DomainName}
+
+  mcControlWebsiteUrl:
+    Description: The URL you should use to access your control website - your FrontEndDomain if you set one, otherwise the default CloudFront domain.
+    Value: !If
+      - FrontEndDomainIsSet
+      - !Sub https://${FrontEndDomain}
+      - !Sub https://${mcCloudFront.DomainName}
 
   mcS3Bucket:
     Description: The name of the created S3 bucket
