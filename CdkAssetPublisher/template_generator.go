@@ -119,8 +119,8 @@ func (generator TemplateGenerator) replaceFrontendURLs(template string) string {
 
 func (generator TemplateGenerator) replaceLambdaCodeBlocks(template string) string {
 	output := template
-	output = generator.replaceCodeBlock(output, "mcStartStopLambda:", "gaming_server_start_stop-v1_0.zip")
-	output = generator.replaceCodeBlock(output, "mcUpdateDnsLambda:", "mcUpdateDNS-v1_0.zip")
+	output = generator.replaceCodeBlock(output, "StartStopLambda:", "gaming_server_start_stop-v1_0.zip")
+	output = generator.replaceCodeBlock(output, "UpdateDnsLambda:", "update-dns-v1_0.zip")
 	return output
 }
 
@@ -160,20 +160,20 @@ func codeBlockEnd(template string, blockStart int) int {
 }
 
 func (generator TemplateGenerator) removeCopyLambdaDependency(template string) string {
-	return strings.ReplaceAll(template, "    DependsOn: mcCopyLambdaFiles\n", "")
+	return strings.ReplaceAll(template, "    DependsOn: CopyLambdaFiles\n", "")
 }
 
 func (generator TemplateGenerator) disableLambdaFileCopy(template string) string {
-	startMarker := "  mcCopyLambdaFiles:\n"
+	startMarker := "  CopyLambdaFiles:\n"
 	start := strings.Index(template, startMarker)
 	if start == -1 {
 		return template
 	}
 
-	endMarker := "\n  mcUpdateConfig:\n"
+	endMarker := "\n  UpdateConfig:\n"
 	relativeEnd := strings.Index(template[start:], endMarker)
 	if relativeEnd == -1 {
-		panic("mcCopyLambdaFiles block end not found")
+		panic("CopyLambdaFiles block end not found")
 	}
 	end := start + relativeEnd
 

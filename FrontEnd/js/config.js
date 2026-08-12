@@ -8,7 +8,7 @@ var mcCognitoDomainName = 'REPLACE-WITH-COGDOMAIN' //mcCognitoDomainName
 var mcCognitoPoolsId = 'REPLACE-WITH-POOLS-ID' //mcCognitoPoolsId
 var API_URL = 'REPLACE-WITH-APIURL'; //mcControlApiUrl
 
-const query_string = "?mctagname=REPLACE-WITH-IDTAGNAME&mctagvalue=REPLACE-WITH-IDTAGVALUE"
+const query_string = "?tagname=REPLACE-WITH-IDTAGNAME&tagvalue=REPLACE-WITH-IDTAGVALUE"
 var tagName = 'REPLACE-WITH-IDTAGNAME'
 var tagValue = 'REPLACE-WITH-IDTAGVALUE'
 var stackname = 'REPLACE-WITH-STACKNAME'

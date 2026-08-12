@@ -27,7 +27,7 @@ def updateDNS(publicIp, hostedZoneId, domainName):
     r53.change_resource_record_sets(
     HostedZoneId=hostedZoneId,
     ChangeBatch={
-        'Comment': 'Auto updated by mc handler',
+        'Comment': 'Auto updated by game server DNS handler',
         'Changes': [
             {
                 'Action': 'UPSERT',

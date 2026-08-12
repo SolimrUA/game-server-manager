@@ -116,7 +116,7 @@ func prepareAssets(config Config) error {
 
 	lambdas := map[string]string{
 		"../Lambda/gaming_server_start_stop-v1_0.py": filepath.Join(config.LocalLambdaBuildDir, "gaming_server_start_stop-v1_0.zip"),
-		"../Lambda/mcUpdateDNS-v1_0.py":              filepath.Join(config.LocalLambdaBuildDir, "mcUpdateDNS-v1_0.zip"),
+		"../Lambda/update-dns-v1_0.py":               filepath.Join(config.LocalLambdaBuildDir, "update-dns-v1_0.zip"),
 	}
 
 	for source, destination := range lambdas {

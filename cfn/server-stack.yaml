@@ -6,7 +6,7 @@ Description: >-
   Personal Gaming Server Manager - one game server instance and everything scoped to it
   (Security Group, IAM role, generated-password SSM parameter, EBS backups, auto shutdown).
   Deploy one of these per game server (e.g. once for Valheim, again for Vintage Story).
-  Requires an mcCommonInfra stack deployed first in the same account+region (imports its
+  Requires an CommonInfra stack deployed first in the same account+region (imports its
   VpcId/SubnetId). Has no dependency on the Control Panel stack - the shared control panel
   discovers this instance purely via the IdTagName/IdTagValue tag at runtime, so IdTagName
   and IdTagValue here must match the values entered on the Control Panel stack, and
@@ -19,6 +19,7 @@ Metadata:
       - Label:
           default: Personal Gaming Server Configuration
         Parameters:
+          - GameName
           - GameServer
           - InstanceType
           - DiskSize
@@ -42,6 +43,8 @@ Metadata:
           - IdTagName
           - LatestAMIIDx86
     ParameterLabels:
+      GameName:
+        default: Short lowercase name for this game, used to name resources (e.g. valheim, vintagestory)
       GameServer:
         default: Choose what game server you wish to install
       InstanceType:
@@ -76,6 +79,12 @@ Metadata:
         default: End of the port range that should be accessible from the internet for UDP traffic.
 
 Parameters:
+  GameName:
+    Description: Short lowercase name for this game, used to name resources - e.g. valheim, vintagestory.
+    Type: String
+    AllowedPattern: '[a-z0-9-]+'
+    ConstraintDescription: Lowercase letters, numbers, and hyphens only.
+    Default: valheim
   GameServer:
     Description: Please enter the URL for the shell script to install the game server of your choice - we call this the game cartridge URL.  Please note this must be an uncompressed shell script to run on selected AMI (Ubuntu by default).
     Type: String
@@ -160,15 +169,15 @@ Parameters:
       (recommended) so the DNS record for your domain can be updated
   IdTagName:
     Description: The name of the tag that will be used to identify your gaming server(s).  DO NOT CHANGE THIS VALUE
-    AllowedPattern: mcServerFinder
-    Default: mcServerFinder
+    AllowedPattern: game-server-finder
+    Default: game-server-finder
     Type: String
-    ConstraintDescription: Please set this to "mcserverfinder" this is required so we can find your server(s) to control them
+    ConstraintDescription: Please set this to "game-server-finder" this is required so we can find your server(s) to control them
   IdTagValue:
-    Description: The value of the tag that will be used to identify your gaming server(s).  This can be useful if you want to control different servers independently - such as if you wanted to spin up a server to test out some features or mods without risking your main server - in this case you may want to change the tag value to something like mcDev or mcTest for example.
+    Description: The value of the tag that will be used to identify your gaming server(s).  This can be useful if you want to control different servers independently - such as if you wanted to spin up a server to test out some features or mods without risking your main server - in this case you may want to change the tag value to something like dev or test for example.
     AllowedPattern: .+
     Type: String
-    Default: mcServer
+    Default: game-server
     ConstraintDescription: This is a mandatory field - you must pust something in.  We recommend not changing the default value.
   ShutdownTimeHours:
     Description: Setting a time here will automatically stop your server at the same time every day.  You adjust the rule, add rules, changes days etc. later directly in the AWS EventBridge Console.  IMPORTANT NOTE - the time must be set in GMT not your local time zone (also note therefore this time will appear to change when going from summer time to winter for relevant time zones).  Leaving blank will not set an auto server shut down rule.
@@ -237,20 +246,20 @@ Conditions:
       - ''
 
 Resources:
-  mcEC2Instance:
+  EC2Instance:
     Type: 'AWS::EC2::Instance'
     Properties:
       SecurityGroupIds:
-        - !Ref mcSecurityGroup
+        - !Ref SecurityGroup
       InstanceType: !Ref InstanceType
       CreditSpecification:
         CPUCredits: Standard
-      SubnetId: !ImportValue mcCommonInfraSubnetId
-      IamInstanceProfile: !Ref mcInstanceProfile
+      SubnetId: !ImportValue common-infra-subnet-id
+      IamInstanceProfile: !Ref InstanceProfile
       KeyName: !Ref KeyName
       Tags:
         - Key: Name
-          Value: Cloudformation MC server
+          Value: !Sub game-server-${GameName}-ec2
         - Key: !Ref IdTagName
           Value: !Ref IdTagValue
         - Key: domain
@@ -276,33 +285,33 @@ Resources:
             wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
             python3 -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-py3-latest.tar.gz
             ln -s /root/aws-cfn-bootstrap-latest/init/ubuntu/cfn-hup /etc/init.d/cfn-hup
-            echo ${AWS::StackName} > /tmp/mcParamName.txt
+            echo ${AWS::StackName} > /tmp/paramName.txt
             mkdir -p /usr/games/install
             cd /usr/games/install
             wget -O gameserverinstall.sh ${GameServer}
             chmod +x gameserverinstall.sh
             ./gameserverinstall.sh
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource mcC2Instance --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
           - GameServer: !Ref GameServer
 
-  mcPwordParameter:
+  PwordParameter:
     Type: AWS::SSM::Parameter
     Properties:
       DataType: text
       Description: Parameter to store temp password randomly generated on initial stack creation
-      Name: !Sub mcValheimPW-${AWS::StackName}
+      Name: !Sub game-password-${AWS::StackName}
       Tier: Standard
       Type: String
       Value: tempValue
 
-  mcInstanceProfile:
+  InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /service-role/
       Roles:
-        - !Ref mcGamingServerIamRole
+        - !Ref GamingServerIamRole
 
-  mcGamingServerIamRole:
+  GamingServerIamRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -315,7 +324,7 @@ Resources:
       Description: IAM role to allow gaming EC2 server to update parameter with generated app password
       Path: /service-role/
       Policies:
-        - PolicyName: mcPersonalGamingServerIamRole
+        - PolicyName: personal-gaming-server-role
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -323,9 +332,9 @@ Resources:
                 Action: "ssm:PutParameter"
                 Resource: !Sub
                   - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${paramName}
-                  - paramName: !Ref mcPwordParameter
+                  - paramName: !Ref PwordParameter
 
-  mcBackupIamRole:
+  BackupIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -338,7 +347,7 @@ Resources:
       Description: Role for custom resource to allow lambda function to execute
       Path: /service-role/
       Policies:
-        - PolicyName: mcBackupInline
+        - PolicyName: BackupInline
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -392,7 +401,7 @@ Resources:
                   - backup:CopyIntoBackupVault
                 Resource: arn:aws:backup:*:*:backup-vault:*
 
-  mcKmsKey:
+  KmsKey:
       Type: AWS::KMS::Key
       Properties:
         Description: "Encryption key gaming server backups"
@@ -408,20 +417,20 @@ Resources:
                 - kms:*
               Resource: "*"
 
-  mcBackupVault:
+  BackupVault:
     Type: "AWS::Backup::BackupVault"
     Properties:
-      BackupVaultName: !Sub "${AWS::StackName}-mcBackupVaultWithDailyBackups"
-      EncryptionKeyArn: !GetAtt mcKmsKey.Arn
+      BackupVaultName: !Sub "${AWS::StackName}-backup-vault-daily"
+      EncryptionKeyArn: !GetAtt KmsKey.Arn
 
-  mcBackupPlan:
+  BackupPlan:
     Type: "AWS::Backup::BackupPlan"
     Properties:
       BackupPlan:
-        BackupPlanName: "mcBackupPlan"
+        BackupPlanName: "backup-plan"
         BackupPlanRule:
-          - RuleName: "mcDailyBackups"
-            TargetBackupVault: !Ref mcBackupVault
+          - RuleName: "daily-backups"
+            TargetBackupVault: !Ref BackupVault
             ScheduleExpression: "cron(0 5 ? * * *)"
             Lifecycle:
               DeleteAfterDays: 7
@@ -430,15 +439,15 @@ Resources:
     Type: "AWS::Backup::BackupSelection"
     Properties:
       BackupSelection:
-        SelectionName: "TagBasedBackupSelection"
-        IamRoleArn: !GetAtt mcBackupIamRole.Arn
+        SelectionName: "tag-based-backup-selection"
+        IamRoleArn: !GetAtt BackupIamRole.Arn
         ListOfTags:
           - ConditionType: "STRINGEQUALS"
             ConditionKey: !Ref IdTagName
             ConditionValue: !Ref IdTagValue
-      BackupPlanId: !Ref mcBackupPlan
+      BackupPlanId: !Ref BackupPlan
 
-  mcGetSrcIpsLambdaIamRole:
+  GetSrcIpsLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -460,9 +469,9 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                 Resource: 'arn:aws:logs:*:*:*'
-          PolicyName: mcGetSrcIpsInline
+          PolicyName: get-src-ips-inline
 
-  mcgetSrcIpsLambda:
+  GetSrcIpsLambda:
     Type: AWS::Lambda::Function
     Properties:
       Code:
@@ -485,59 +494,59 @@ Resources:
               else:
                 cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Update or Delete action not Supported.'})
       Description: Custom resource lambda to obtain source IP address range for EC2 Instance Connect in current region
-      Role: !GetAtt mcGetSrcIpsLambdaIamRole.Arn
+      Role: !GetAtt GetSrcIpsLambdaIamRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
       Timeout: 10
 
-  mcGetInstanceConnectIps:
+  GetInstanceConnectIps:
     Type: Custom::GetSourceIps
     Properties:
-      ServiceToken: !GetAtt mcgetSrcIpsLambda.Arn
+      ServiceToken: !GetAtt GetSrcIpsLambda.Arn
       region: !Ref AWS::Region
 
-  mcSecurityGroup:
+  SecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       Tags:
         - Key: Name
           Value: CF Gaming server Security Group
       GroupDescription: Enable HTTP access via port 80 locked down to the load balancer
-      VpcId: !ImportValue mcCommonInfraVpcId
+      VpcId: !ImportValue common-infra-vpc-id
 
-  mcSecurityGroupIngressTCP:
+  SecurityGroupIngressTCP:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: hasTCP
     Properties:
       Description: Rule to allow gaming clients connect to your game server over TCP IPv4
-      GroupId: !Ref mcSecurityGroup
+      GroupId: !Ref SecurityGroup
       IpProtocol: TCP
       FromPort: !Ref GamingTCPTrafficPortStart
       ToPort: !Ref GamingTCPTrafficPortEnd
       CidrIp: 0.0.0.0/0
 
-  mcSecurityGroupIngressUDP:
+  SecurityGroupIngressUDP:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: hasUDP
     Properties:
       Description: Rule to allow gaming clients connect to your game server over UDP IPv4
-      GroupId: !Ref mcSecurityGroup
+      GroupId: !Ref SecurityGroup
       IpProtocol: UDP
       FromPort: !Ref GamingUDPTrafficPortStart
       ToPort: !Ref GamingUDPTrafficPortEnd
       CidrIp: 0.0.0.0/0
 
-  mcSecurityGroupIngressEC2Connect:
+  SecurityGroupIngressEC2Connect:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
       Description: Rule to allow EC2 Instance Connect to SSH into instance
-      GroupId: !Ref mcSecurityGroup
+      GroupId: !Ref SecurityGroup
       IpProtocol: tcp
       FromPort: 22
       ToPort: 22
-      CidrIp: !GetAtt mcGetInstanceConnectIps.srcip
+      CidrIp: !GetAtt GetInstanceConnectIps.srcip
 
-  mcBedTimeStopLambdaIamRole:
+  BedTimeStopLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -550,7 +559,7 @@ Resources:
       Description: Execution role for the per-server auto-shutdown lambda
       Path: /service-role/
       Policies:
-        - PolicyName: mcBedTimeStopInline
+        - PolicyName: bed-time-stop-inline
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -562,9 +571,9 @@ Resources:
                 Resource: 'arn:aws:logs:*:*:*'
               - Effect: Allow
                 Action: 'ec2:StopInstances'
-                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${mcEC2Instance}
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${EC2Instance}
 
-  mcBedTimeStopLambda:
+  BedTimeStopLambda:
     Type: AWS::Lambda::Function
     Properties:
       Code:
@@ -574,11 +583,11 @@ Resources:
               boto3.client('ec2').stop_instances(InstanceIds=[event['instanceId']])
       Description: Stops this stack's own EC2 instance on the daily auto-shutdown schedule
       Handler: index.lambda_handler
-      Role: !GetAtt mcBedTimeStopLambdaIamRole.Arn
+      Role: !GetAtt BedTimeStopLambdaIamRole.Arn
       Runtime: python3.8
       Timeout: 10
 
-  mcBedTime:
+  BedTime:
     Type: AWS::Events::Rule
     Properties:
       Description: Rule to shutdown server at certain time every day
@@ -600,31 +609,31 @@ Resources:
         - DISABLED
         - ENABLED
       Targets:
-        -   Arn: !GetAtt mcBedTimeStopLambda.Arn
-            Id: mcBedTimeStopLambdaFunction
-            Input: !Sub '{"instanceId": "${mcEC2Instance}"}'
+        -   Arn: !GetAtt BedTimeStopLambda.Arn
+            Id: BedTimeStopLambdaFunction
+            Input: !Sub '{"instanceId": "${EC2Instance}"}'
 
-  mcBedTimeLambdaPermission:
+  BedTimeLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref mcBedTimeStopLambda
+      FunctionName: !Ref BedTimeStopLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
-      SourceArn: !GetAtt mcBedTime.Arn
+      SourceArn: !GetAtt BedTime.Arn
 
 Outputs:
-  mcPublicIp:
+  PublicIp:
     Description: This is the public IP for your gaming server, you will need to run a "start" command to associate your domain name with it (if you selected one)
-    Value: !GetAtt mcEC2Instance.PublicIp
+    Value: !GetAtt EC2Instance.PublicIp
 
-  mcInstanceId:
+  InstanceId:
     Description: The EC2 instance ID for this game server
-    Value: !Ref mcEC2Instance
+    Value: !Ref EC2Instance
 
-  mcTagName:
-    Description: Tag name used.  This should not have been changed, and should be mcServerFinder
+  TagName:
+    Description: Tag name used.  This should not have been changed, and should be ServerFinder
     Value: !Ref IdTagName
 
-  mcTagValue:
+  TagValue:
     Description: Tag value selected to identify this server. Must match the value entered on your Control Panel stack.
     Value: !Ref IdTagValue

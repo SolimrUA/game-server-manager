@@ -5,34 +5,34 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: >-
   Personal Gaming Server Manager - Common networking infrastructure (VPC/Subnet/Internet Gateway).
   Deploy this stack once per account+region, before any Server or Control Panel stack.
-  Its VpcId/SubnetId are exported under fixed names (mcCommonInfraVpcId/mcCommonInfraSubnetId) and
+  Its VpcId/SubnetId are exported under fixed names (CommonInfraVpcId/CommonInfraSubnetId) and
   imported by every Server stack - Fn::ImportValue only resolves within the same account+region, so
   this stack must live in the same account+region as the Server stacks that depend on it.
 
 Resources:
-  mcInternetGateway:
+  InternetGateway:
     Type: 'AWS::EC2::InternetGateway'
     Properties:
       Tags:
         - Key: Name
           Value: CF Gamine Server IG
 
-  mcRouteTable:
+  RouteTable:
     Type: 'AWS::EC2::RouteTable'
     Properties:
       Tags:
         - Key: Name
           Value: CF Gaming Server Route Table
-      VpcId: !Ref mcVPC
+      VpcId: !Ref VPC
 
-  mcRoute:
+  Route:
     Type: 'AWS::EC2::Route'
     Properties:
       DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref mcInternetGateway
-      RouteTableId: !Ref mcRouteTable
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref RouteTable
 
-  mcSubnet:
+  Subnet:
     Type: 'AWS::EC2::Subnet'
     Properties:
       Tags:
@@ -40,9 +40,9 @@ Resources:
           Value: CF Gaming Server Subnet
       CidrBlock: 10.0.0.0/24
       MapPublicIpOnLaunch: 'true'
-      VpcId: !Ref mcVPC
+      VpcId: !Ref VPC
 
-  mcVPC:
+  VPC:
     Type: 'AWS::EC2::VPC'
     Properties:
       Tags:
@@ -52,27 +52,27 @@ Resources:
       EnableDnsHostnames: 'true'
       EnableDnsSupport: 'true'
 
-  mcIgAttachment:
+  IgAttachment:
     Type: 'AWS::EC2::VPCGatewayAttachment'
     Properties:
-      VpcId: !Ref mcVPC
-      InternetGatewayId: !Ref mcInternetGateway
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
 
-  mcRouteTblAttach:
+  RouteTblAttach:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
-      RouteTableId: !Ref mcRouteTable
-      SubnetId: !Ref mcSubnet
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref Subnet
 
 Outputs:
-  mcVpcId:
-    Description: VPC ID - imported by every Server stack via Fn::ImportValue mcCommonInfraVpcId
-    Value: !Ref mcVPC
+  VpcId:
+    Description: VPC ID - imported by every Server stack via Fn::ImportValue common-infra-vpc-id
+    Value: !Ref VPC
     Export:
-      Name: mcCommonInfraVpcId
+      Name: common-infra-vpc-id
 
-  mcSubnetId:
-    Description: Subnet ID - imported by every Server stack via Fn::ImportValue mcCommonInfraSubnetId
-    Value: !Ref mcSubnet
+  SubnetId:
+    Description: Subnet ID - imported by every Server stack via Fn::ImportValue common-infra-subnet-id
+    Value: !Ref Subnet
     Export:
-      Name: mcCommonInfraSubnetId
+      Name: common-infra-subnet-id

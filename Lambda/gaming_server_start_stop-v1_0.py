@@ -9,45 +9,45 @@ import os
 
 def lambda_handler(event, context): #standard function called on lambda invocation
     
-    mcTagKey = event['mcTagName'] #This is the Tag for the resources we're looking to handle
-    mcTagValue = event['mcTagValue'] #This is the Tag for the resources we're looking to handle
-    mcTargetInstanceId = event.get('instanceId') #Optional - restricts start/stop/resize to a single instance instead of all tagged instances
+    tagKey = event['tagName'] #This is the Tag for the resources we're looking to handle
+    tagValue = event['tagValue'] #This is the Tag for the resources we're looking to handle
+    targetInstanceId = event.get('instanceId') #Optional - restricts start/stop/resize to a single instance instead of all tagged instances
     global ec2
-    mcInstanceIds = [] 
-    mcInfo = []
+    instanceIds = [] 
+    info = []
     serverResizeCheck = "OK"
     statemachineresponse = {}
     
     ec2 = boto3.client('ec2') #Sets up ec2 as the object to call the boto3 (AWS Python SDK) client library for the EC2 service
-    mcInfo = getInfo(mcTagKey, mcTagValue)
+    info = getInfo(tagKey, tagValue)
     
-    if len(mcInfo['Instances']) < 1:
+    if len(info['Instances']) < 1:
         statusmessage = "No gaming server instances found" #sets errormessage variable to error text as shown
         return(statusmessage)
 
     #Determine which instances the start/stop/resize action should actually apply to.
     #If instanceId was supplied, restrict to that single instance; otherwise fall back to all tagged instances.
-    if mcTargetInstanceId:
-        targetInstances = [i for i in mcInfo['Instances'] if i['InstanceId'] == mcTargetInstanceId]
+    if targetInstanceId:
+        targetInstances = [i for i in info['Instances'] if i['InstanceId'] == targetInstanceId]
         if len(targetInstances) < 1:
             statusmessage = "Requested instanceId was not found among your gaming server instances"
-            return(statusmessage, mcInfo)
+            return(statusmessage, info)
     else:
-        targetInstances = mcInfo['Instances']
+        targetInstances = info['Instances']
 
     for i in targetInstances:
         foundInstanceId = i['InstanceId']
-        mcInstanceIds.append(foundInstanceId)
+        instanceIds.append(foundInstanceId)
         
 
     if event['command'] == "start":
         try:
-            ec2.start_instances(InstanceIds=mcInstanceIds)
+            ec2.start_instances(InstanceIds=instanceIds)
             statusmessage = "If this message appears, something has gone very wrong"
         except:
             print("start failed")
             statusmessage = "Couldn't start servers, please try again later"
-            return(statusmessage,mcInfo)
+            return(statusmessage,info)
         try:
             statemachineresponse = updateDnsStateFunc({'Instances': targetInstances})
             print(statemachineresponse)
@@ -56,7 +56,7 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             statusmessage = "Servers started, but DNS update failed - please wait a few minutes and try again or check your hosted zone is setup correctly"
     elif event['command'] == "stop":
         try:
-            ec2.stop_instances(InstanceIds=mcInstanceIds)
+            ec2.stop_instances(InstanceIds=instanceIds)
             statusmessage = "Stopped Servers"
         except:
             statusmessage = "Stopping servers failed - please wait a few minutes and try again"  
@@ -66,9 +66,9 @@ def lambda_handler(event, context): #standard function called on lambda invocati
         for i in targetInstances:
             if i['State'] != "stopped":
                 statusmessage = "Your servers are not stopped. Please stop your servers and retry resizing them"
-                return (statusmessage,mcInfo)
+                return (statusmessage,info)
             try:
-                for i in mcInstanceIds:
+                for i in instanceIds:
                     try:
                         ec2.modify_instance_attribute(
                             InstanceId=i,
@@ -84,39 +84,39 @@ def lambda_handler(event, context): #standard function called on lambda invocati
                     statusmessage = "Something went wrong with resizing servers, please try again later"
     else:
         statusmessage = "Error - invalid invocation event received"
-    return(statusmessage,mcInfo)
+    return(statusmessage,info)
 
-def getInfo(mcTagKey, mcTagValue):
-    mcInfo = json.loads('{"Instances":[]}')
-    filter =[{'Name': 'tag:'+mcTagKey, 'Values': [mcTagValue]}]
+def getInfo(tagKey, tagValue):
+    info = json.loads('{"Instances":[]}')
+    filter =[{'Name': 'tag:'+tagKey, 'Values': [tagValue]}]
     response = ec2.describe_instances(Filters=filter)
     for reservation in response["Reservations"]: #starts for loop for all reservations returned
         for instance in reservation["Instances"]:
             if instance['State'].get('Name') != 'terminated':
-                mcInfoDict = {}
-                mcInfoDict['InstanceId'] = instance['InstanceId']
-                mcInfoDict['InstanceType'] = instance['InstanceType']
-                mcInfoDict['State'] = instance['State'].get('Name')
+                infoDict = {}
+                infoDict['InstanceId'] = instance['InstanceId']
+                infoDict['InstanceType'] = instance['InstanceType']
+                infoDict['State'] = instance['State'].get('Name')
                 for i in instance['Tags']:
                     if(i.get('Key') == 'domain'):
-                        mcInfoDict['DomainName'] = i.get('Value','No domain value found')
+                        infoDict['DomainName'] = i.get('Value','No domain value found')
                         break
                     else:
-                        mcInfoDict['DomainName'] = 'No domain tag found' 
+                        infoDict['DomainName'] = 'No domain tag found' 
                 for i in instance['Tags']:
                     if(i.get('Key') == 'hostedZoneId'):
-                        mcInfoDict['hostedZoneId'] = i.get('Value','No hosted zone value found')
+                        infoDict['hostedZoneId'] = i.get('Value','No hosted zone value found')
                         break
                     else:
-                        mcInfoDict["hostedZoneId"] = 'No hosted zone tag found'
-                mcInfoDict['PublicIpAddress'] = instance.get('PublicIpAddress','No public IP address')
-                mcInfo["Instances"].append(mcInfoDict)
-    return(mcInfo)
+                        infoDict["hostedZoneId"] = 'No hosted zone tag found'
+                infoDict['PublicIpAddress'] = instance.get('PublicIpAddress','No public IP address')
+                info["Instances"].append(infoDict)
+    return(info)
     
-def updateDnsStateFunc(mcInfo):
+def updateDnsStateFunc(info):
     stepfunction = boto3.client('stepfunctions')
     consolidatedsmresponse = []
-    for i in mcInfo['Instances']:
+    for i in info['Instances']:
         hzi = i.get('hostedZoneId')
         dn = i.get('DomainName')
         inid = i.get('InstanceId')

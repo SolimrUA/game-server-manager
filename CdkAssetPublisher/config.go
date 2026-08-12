@@ -20,12 +20,12 @@ const localConfigFile = ".env"
 // ASSET_KEY_PREFIX=personal-game-server-manager/v1
 //
 // Optional path overrides, relative to CdkAssetPublisher/.
-// COMMON_SOURCE_TEMPLATE_PATH=../cfn/mcCommonInfra.yaml
-// COMMON_OUTPUT_TEMPLATE_PATH=../build/mcCommonInfra.assets.yaml
-// SERVER_SOURCE_TEMPLATE_PATH=../cfn/mcServerStack.yaml
-// SERVER_OUTPUT_TEMPLATE_PATH=../build/mcServerStack.assets.yaml
-// CONTROLPANEL_SOURCE_TEMPLATE_PATH=../cfn/mcControlPanel.yaml
-// CONTROLPANEL_OUTPUT_TEMPLATE_PATH=../build/mcControlPanel.assets.yaml
+// COMMON_SOURCE_TEMPLATE_PATH=../cfn/common-infra.yaml
+// COMMON_OUTPUT_TEMPLATE_PATH=../build/common-infra.assets.yaml
+// SERVER_SOURCE_TEMPLATE_PATH=../cfn/server-stack.yaml
+// SERVER_OUTPUT_TEMPLATE_PATH=../build/server-stack.assets.yaml
+// CONTROLPANEL_SOURCE_TEMPLATE_PATH=../cfn/control-panel.yaml
+// CONTROLPANEL_OUTPUT_TEMPLATE_PATH=../build/control-panel.assets.yaml
 // LOCAL_ASSET_BUILD_DIR=../build/assets
 // LOCAL_LAMBDA_BUILD_DIR=../build/assets/Lambda
 // LOCAL_FRONTEND_BUILD_DIR=../build/assets/FrontEnd
@@ -64,12 +64,12 @@ func LoadConfig() (Config, error) {
 		CreateAssetBucket: boolEnv("CREATE_ASSET_BUCKET", true),
 		AssetKeyPrefix:    stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
 
-		CommonSourceTemplatePath:       stringEnv("COMMON_SOURCE_TEMPLATE_PATH", "../cfn/mcCommonInfra.yaml"),
-		CommonOutputTemplatePath:       stringEnv("COMMON_OUTPUT_TEMPLATE_PATH", "../build/mcCommonInfra.assets.yaml"),
-		ServerSourceTemplatePath:       stringEnv("SERVER_SOURCE_TEMPLATE_PATH", "../cfn/mcServerStack.yaml"),
-		ServerOutputTemplatePath:       stringEnv("SERVER_OUTPUT_TEMPLATE_PATH", "../build/mcServerStack.assets.yaml"),
-		ControlPanelSourceTemplatePath: stringEnv("CONTROLPANEL_SOURCE_TEMPLATE_PATH", "../cfn/mcControlPanel.yaml"),
-		ControlPanelOutputTemplatePath: stringEnv("CONTROLPANEL_OUTPUT_TEMPLATE_PATH", "../build/mcControlPanel.assets.yaml"),
+		CommonSourceTemplatePath:       stringEnv("COMMON_SOURCE_TEMPLATE_PATH", "../cfn/common-infra.yaml"),
+		CommonOutputTemplatePath:       stringEnv("COMMON_OUTPUT_TEMPLATE_PATH", "../build/common-infra.assets.yaml"),
+		ServerSourceTemplatePath:       stringEnv("SERVER_SOURCE_TEMPLATE_PATH", "../cfn/server-stack.yaml"),
+		ServerOutputTemplatePath:       stringEnv("SERVER_OUTPUT_TEMPLATE_PATH", "../build/server-stack.assets.yaml"),
+		ControlPanelSourceTemplatePath: stringEnv("CONTROLPANEL_SOURCE_TEMPLATE_PATH", "../cfn/control-panel.yaml"),
+		ControlPanelOutputTemplatePath: stringEnv("CONTROLPANEL_OUTPUT_TEMPLATE_PATH", "../build/control-panel.assets.yaml"),
 
 		LocalAssetBuildDir: stringEnv("LOCAL_ASSET_BUILD_DIR", "../build/assets"),
 	}

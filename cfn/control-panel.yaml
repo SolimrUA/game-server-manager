@@ -46,15 +46,15 @@ Parameters:
       (recommended) so the DNS record for your domain can be updated
   IdTagName:
     Description: The name of the tag that will be used to identify your gaming server(s).  DO NOT CHANGE THIS VALUE
-    AllowedPattern: mcServerFinder
-    Default: mcServerFinder
+    AllowedPattern: game-server-finder
+    Default: game-server-finder
     Type: String
-    ConstraintDescription: Please set this to "mcserverfinder" this is required so we can find your server(s) to control them
+    ConstraintDescription: Please set this to "game-server-finder" this is required so we can find your server(s) to control them
   IdTagValue:
     Description: The value of the tag that will be used to identify your gaming server(s). Must match the value used on every Server stack you want this control panel to manage.
     AllowedPattern: .+
     Type: String
-    Default: mcServer
+    Default: game-server
     ConstraintDescription: This is a mandatory field - you must pust something in.  We recommend not changing the default value.
 
 Conditions:
@@ -64,76 +64,76 @@ Conditions:
       - ''
 
 Resources:
-  mcControlApi:
+  ControlApi:
     Type: 'AWS::ApiGateway::RestApi'
     Properties:
       Description: "Primary API to control gaming server"
-      Name: !Sub mcControlApi-${AWS::StackName}
+      Name: !Sub control-api-${AWS::StackName}
       EndpointConfiguration:
         Types:
           - REGIONAL
       FailOnWarnings: true
 
-  mcCognitoAuthoriser:
+  CognitoAuthoriser:
     Type: 'AWS::ApiGateway::Authorizer'
     Properties:
       IdentitySource: method.request.header.Authorization
-      Name: mcCognitoAuthoriser
+      Name: cognito-authoriser
       ProviderARNs:
-        - !GetAtt mcCognitoUserPool.Arn
-      RestApiId: !Ref mcControlApi
+        - !GetAtt CognitoUserPool.Arn
+      RestApiId: !Ref ControlApi
       Type: COGNITO_USER_POOLS
 
-  mcControlApiDeployment:
-    DependsOn: mcApiGetInfoGetMethod
+  ControlApiDeployment:
+    DependsOn: ApiGetInfoGetMethod
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
-      RestApiId: !Ref mcControlApi
+      RestApiId: !Ref ControlApi
       Description: Deployment of gaming control REST API
       StageName: prod
 
-  mcControlApiResGetInfo:
+  ControlApiResGetInfo:
     Type: 'AWS::ApiGateway::Resource'
     Properties:
       ParentId: !GetAtt
-        - mcControlApi
+        - ControlApi
         - RootResourceId
       PathPart: getinfo
-      RestApiId: !Ref mcControlApi
+      RestApiId: !Ref ControlApi
 
-  mcControlApiResResize:
+  ControlApiResResize:
     Type: 'AWS::ApiGateway::Resource'
     Properties:
       ParentId: !GetAtt
-        - mcControlApi
+        - ControlApi
         - RootResourceId
       PathPart: resize
-      RestApiId: !Ref mcControlApi
+      RestApiId: !Ref ControlApi
 
-  mcControlApiResStart:
+  ControlApiResStart:
     Type: 'AWS::ApiGateway::Resource'
     Properties:
       ParentId: !GetAtt
-        - mcControlApi
+        - ControlApi
         - RootResourceId
       PathPart: start
-      RestApiId: !Ref mcControlApi
+      RestApiId: !Ref ControlApi
 
-  mcControlApiResStop:
+  ControlApiResStop:
     Type: 'AWS::ApiGateway::Resource'
     Properties:
       ParentId: !GetAtt
-        - mcControlApi
+        - ControlApi
         - RootResourceId
       PathPart: stop
-      RestApiId: !Ref mcControlApi
+      RestApiId: !Ref ControlApi
 
-  mcApiGetInfoGetMethod:
+  ApiGetInfoGetMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
       AuthorizationType: COGNITO_USER_POOLS
-      AuthorizerId: !Ref mcCognitoAuthoriser
+      AuthorizerId: !Ref CognitoAuthoriser
       HttpMethod: GET
       Integration:
           IntegrationHttpMethod: POST
@@ -145,12 +145,12 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"getInfo\",\r\n \"mcTagName\": \"$input.params('mctagname')\",\r\n \"mcTagValue\": \"$input.params('mctagvalue')\"\r\n}"
+            application/json : "{\r\n \"command\": \"getInfo\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
             - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
-            - lambdaArn: !GetAtt mcStartStopLambda.Arn
+            - lambdaArn: !GetAtt StartStopLambda.Arn
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
@@ -159,12 +159,12 @@ Resources:
             method.response.header.Access-Control-Allow-Origin : false
       OperationName: GetInfo
       RequestParameters:
-        method.request.querystring.mctagname : false
-        method.request.querystring.mctagvalue : false
-      ResourceId: !Ref mcControlApiResGetInfo
-      RestApiId: !Ref mcControlApi
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+      ResourceId: !Ref ControlApiResGetInfo
+      RestApiId: !Ref ControlApi
 
-  mcApiGetInfoOptionsMethod:
+  ApiGetInfoOptionsMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
@@ -195,15 +195,15 @@ Resources:
             method.response.header.Access-Control-Allow-Credentials : false
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: GetInfoOPTIONS
-      ResourceId: !Ref mcControlApiResGetInfo
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResGetInfo
+      RestApiId: !Ref ControlApi
 
-  mcApiStartGetMethod:
+  ApiStartGetMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
       AuthorizationType: COGNITO_USER_POOLS
-      AuthorizerId: !Ref mcCognitoAuthoriser
+      AuthorizerId: !Ref CognitoAuthoriser
       HttpMethod: GET
       Integration:
           IntegrationHttpMethod: POST
@@ -215,12 +215,12 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"start\",\r\n \"mcTagName\": \"$input.params('mctagname')\",\r\n \"mcTagValue\": \"$input.params('mctagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"start\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
             - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
-            - lambdaArn: !GetAtt mcStartStopLambda.Arn
+            - lambdaArn: !GetAtt StartStopLambda.Arn
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
@@ -229,13 +229,13 @@ Resources:
             method.response.header.Access-Control-Allow-Origin : false
       OperationName: Start
       RequestParameters:
-        method.request.querystring.mctagname : false
-        method.request.querystring.mctagvalue : false
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
         method.request.querystring.instanceid : false
-      ResourceId: !Ref mcControlApiResStart
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResStart
+      RestApiId: !Ref ControlApi
 
-  mcApiStartOptionsMethod:
+  ApiStartOptionsMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
@@ -266,15 +266,15 @@ Resources:
             method.response.header.Access-Control-Allow-Credentials : false
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: StartOPTIONS
-      ResourceId: !Ref mcControlApiResStart
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResStart
+      RestApiId: !Ref ControlApi
 
-  mcApiStopGetMethod:
+  ApiStopGetMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
       AuthorizationType: COGNITO_USER_POOLS
-      AuthorizerId: !Ref mcCognitoAuthoriser
+      AuthorizerId: !Ref CognitoAuthoriser
       HttpMethod: GET
       Integration:
           IntegrationHttpMethod: POST
@@ -286,12 +286,12 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"stop\",\r\n \"mcTagName\": \"$input.params('mctagname')\",\r\n \"mcTagValue\": \"$input.params('mctagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"stop\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
             - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
-            - lambdaArn: !GetAtt mcStartStopLambda.Arn
+            - lambdaArn: !GetAtt StartStopLambda.Arn
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
@@ -300,13 +300,13 @@ Resources:
             method.response.header.Access-Control-Allow-Origin : false
       OperationName: Stop
       RequestParameters:
-        method.request.querystring.mctagname : false
-        method.request.querystring.mctagvalue : false
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
         method.request.querystring.instanceid : false
-      ResourceId: !Ref mcControlApiResStop
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResStop
+      RestApiId: !Ref ControlApi
 
-  mcApiStopOptionsMethod:
+  ApiStopOptionsMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
@@ -337,15 +337,15 @@ Resources:
             method.response.header.Access-Control-Allow-Credentials : false
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: StopOPTIONS
-      ResourceId: !Ref mcControlApiResStop
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResStop
+      RestApiId: !Ref ControlApi
 
-  mcApiResizeGetMethod:
+  ApiResizeGetMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
       AuthorizationType: COGNITO_USER_POOLS
-      AuthorizerId: !Ref mcCognitoAuthoriser
+      AuthorizerId: !Ref CognitoAuthoriser
       HttpMethod: GET
       Integration:
           IntegrationHttpMethod: POST
@@ -357,12 +357,12 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"reSize\",\r\n \"mcTagName\": \"$input.params('mctagname')\",\r\n \"mcTagValue\": \"$input.params('mctagvalue')\",\r\n \"reSizeType\": \"$input.params('resize')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"reSize\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"reSizeType\": \"$input.params('resize')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
             - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
-            - lambdaArn: !GetAtt mcStartStopLambda.Arn
+            - lambdaArn: !GetAtt StartStopLambda.Arn
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
@@ -371,14 +371,14 @@ Resources:
             method.response.header.Access-Control-Allow-Origin : false
       OperationName: Resize
       RequestParameters:
-        method.request.querystring.mctagname : false
-        method.request.querystring.mctagvalue : false
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
         method.request.querystring.resize : false
         method.request.querystring.instanceid : false
-      ResourceId: !Ref mcControlApiResResize
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResResize
+      RestApiId: !Ref ControlApi
 
-  mcApiResizeOptionsMethod:
+  ApiResizeOptionsMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       ApiKeyRequired: false
@@ -409,10 +409,10 @@ Resources:
             method.response.header.Access-Control-Allow-Credentials : false
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: ResizeOPTIONS
-      ResourceId: !Ref mcControlApiResResize
-      RestApiId: !Ref mcControlApi
+      ResourceId: !Ref ControlApiResResize
+      RestApiId: !Ref ControlApi
 
-  mcStateMachineDNS:
+  StateMachineDNS:
     Type: 'AWS::StepFunctions::StateMachine'
     Properties:
       Definition:
@@ -421,7 +421,7 @@ Resources:
         States:
           getIpUpdateDNS:
             Type: Task
-            Resource: '${mcUpdateDns}'
+            Resource: '${UpdateDns}'
             Retry:
               - ErrorEquals:
                   - noIpFound
@@ -440,12 +440,12 @@ Resources:
                 BackoffRate: 2
             End: true
       DefinitionSubstitutions:
-        mcUpdateDns: !GetAtt mcUpdateDnsLambda.Arn
-      RoleArn: !GetAtt mcStateMachineIamRole.Arn
-      StateMachineName: !Sub ${AWS::StackName}-mcStateMachine
+        UpdateDns: !GetAtt UpdateDnsLambda.Arn
+      RoleArn: !GetAtt StateMachineIamRole.Arn
+      StateMachineName: !Sub ${AWS::StackName}-state-machine
       StateMachineType: STANDARD
 
-  mcCognitoUserPool:
+  CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       AdminCreateUserConfig:
@@ -471,17 +471,17 @@ Resources:
       UsernameConfiguration:
           CaseSensitive: false
 
-  mcUserPoolDomain:
+  UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
       Domain: !Join
         - ''
         - !Split
           - '.cloudfront.net'
-          - !GetAtt mcCloudFront.DomainName
-      UserPoolId: !Ref mcCognitoUserPool
+          - !GetAtt CloudFront.DomainName
+      UserPoolId: !Ref CognitoUserPool
 
-  mcCognitoAppClient:
+  CognitoAppClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       AccessTokenValidity: 1
@@ -496,11 +496,11 @@ Resources:
         - !If
           - FrontEndDomainIsSet
           - !Sub https://${FrontEndDomain}/signed_in.html
-          - !Sub https://${mcCloudFront.DomainName}/signed_in.html
+          - !Sub https://${CloudFront.DomainName}/signed_in.html
       DefaultRedirectURI: !If
         - FrontEndDomainIsSet
         - !Sub https://${FrontEndDomain}/signed_in.html
-        - !Sub https://${mcCloudFront.DomainName}/signed_in.html
+        - !Sub https://${CloudFront.DomainName}/signed_in.html
       ExplicitAuthFlows:
         - ALLOW_REFRESH_TOKEN_AUTH
         - ALLOW_USER_SRP_AUTH
@@ -510,13 +510,13 @@ Resources:
         - !If
           - FrontEndDomainIsSet
           - !Sub https://${FrontEndDomain}/logout.html
-          - !Sub https://${mcCloudFront.DomainName}/logout.html
+          - !Sub https://${CloudFront.DomainName}/logout.html
       PreventUserExistenceErrors: ENABLED
       SupportedIdentityProviders:
         - COGNITO
-      UserPoolId: !Ref mcCognitoUserPool
+      UserPoolId: !Ref CognitoUserPool
 
-  mcStateMachineIamRole:
+  StateMachineIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -529,7 +529,7 @@ Resources:
       Description: State machine execution role
       Path: /service-role/
       Policies:
-        - PolicyName: mcStateMachineInline
+        - PolicyName: state-machine-inline
           PolicyDocument:
               Version: 2012-10-17
               Statement:
@@ -537,9 +537,9 @@ Resources:
                   Action:
                     - 'lambda:InvokeFunction'
                   Resource:
-                    - !GetAtt mcUpdateDnsLambda.Arn
+                    - !GetAtt UpdateDnsLambda.Arn
 
-  mcCustomResourceLambdaIamRole:
+  CustomResourceLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -565,9 +565,9 @@ Resources:
                 Action:
                   - 's3:ListBucket'
                 Resource:
-                  - !GetAtt mcLambdaSourceFilesS3.Arn
-                  - !GetAtt mcS3Bucket.Arn
-                  - !GetAtt mcLoggingBucket.Arn
+                  - !GetAtt LambdaSourceFilesS3.Arn
+                  - !GetAtt S3Bucket.Arn
+                  - !GetAtt LoggingBucket.Arn
               - Effect: Allow
                 Action:
                   - 's3:PutObject'
@@ -576,16 +576,16 @@ Resources:
                 Resource:
                   - !Sub
                     - ${bucket}/*
-                    - bucket: !GetAtt mcLambdaSourceFilesS3.Arn
+                    - bucket: !GetAtt LambdaSourceFilesS3.Arn
                   - !Sub
                     - ${bucket}/*
-                    - bucket: !GetAtt mcS3Bucket.Arn
+                    - bucket: !GetAtt S3Bucket.Arn
                   - !Sub
                     - ${bucket}/*
-                    - bucket: !GetAtt mcLoggingBucket.Arn
-          PolicyName: mcCustomResourceInline
+                    - bucket: !GetAtt LoggingBucket.Arn
+          PolicyName: custom-resource-inline
 
-  mcUpdateDnsLambdaIamRole:
+  UpdateDnsLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -595,10 +595,10 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: 'sts:AssumeRole'
-      Description: Execution role for mcStartStop Lambda function
+      Description: Execution role for StartStop Lambda function
       Path: /service-role/
       Policies:
-        - PolicyName: mcUpdateDnsInline
+        - PolicyName: update-dns-inline
           PolicyDocument:
             !Sub
               - |
@@ -631,7 +631,7 @@ Resources:
                   }
               - hostedZone: !Ref HostedZoneId
 
-  mcAcmCertLambdaIamRole:
+  AcmCertLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Condition: FrontEndDomainIsSet
     Properties:
@@ -645,7 +645,7 @@ Resources:
       Description: Execution role for the ACM DNS-validated certificate custom resource
       Path: /service-role/
       Policies:
-        - PolicyName: mcAcmCertInline
+        - PolicyName: acm-cert-inline
           PolicyDocument:
             !Sub
               - |
@@ -685,7 +685,7 @@ Resources:
                   }
               - hostedZone: !Ref HostedZoneId
 
-  mcStartStopLambdaIamRole:
+  StartStopLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -695,10 +695,10 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: 'sts:AssumeRole'
-      Description: Execution role for mcStartStop Lambda function
+      Description: Execution role for StartStop Lambda function
       Path: /service-role/
       Policies:
-        - PolicyName: mcStartStopInline
+        - PolicyName: start-stop-inline
           PolicyDocument:
             !Sub
               - |
@@ -717,7 +717,7 @@ Resources:
                         {
                           "Effect": "Allow",
                           "Action": "states:StartExecution",
-                          "Resource": "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-mcStateMachine"
+                          "Resource": "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-state-machine"
                         },
                         {
                         "Effect": "Allow",
@@ -747,7 +747,7 @@ Resources:
               - tagname: !Ref IdTagName
                 tagvalue: !Ref IdTagValue
 
-  mcCopyToS3Lambda:
+  CopyToS3Lambda:
     Type: 'AWS::Lambda::Function'
     Properties:
       Code:
@@ -799,12 +799,12 @@ Resources:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failed to empty bucket please clean up manually'})
               cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Update action not Supported.'})
       Description: Custom resource lambda to copy required code files from github to S3
-      Role: !GetAtt mcCustomResourceLambdaIamRole.Arn
+      Role: !GetAtt CustomResourceLambdaIamRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
       Timeout: 10
 
-  mcUpdateConfigLambda:
+  UpdateConfigLambda:
     Type: AWS::Lambda::Function
     Properties:
       Code:
@@ -842,12 +842,12 @@ Resources:
                       cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failed to copy files'})
               cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Update or Delete action not Supported.'})
       Description: Custom resource lambda to update config files on stack build complete
-      Role: !GetAtt mcCustomResourceLambdaIamRole.Arn
+      Role: !GetAtt CustomResourceLambdaIamRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
       Timeout: 10
 
-  mcAcmCertificateLambda:
+  AcmCertificateLambda:
     Type: AWS::Lambda::Function
     Condition: FrontEndDomainIsSet
     Properties:
@@ -917,17 +917,17 @@ Resources:
                   print(e)
                   cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': str(e)}, physicalResourceId=physicalId)
       Description: Custom resource lambda to request and DNS-validate an ACM certificate for the front-end CloudFront distribution
-      Role: !GetAtt mcAcmCertLambdaIamRole.Arn
+      Role: !GetAtt AcmCertLambdaIamRole.Arn
       Handler: index.lambda_handler
       Runtime: python3.8
       Timeout: 900
 
-  mcStartStopLambda:
+  StartStopLambda:
     Type: 'AWS::Lambda::Function'
-    DependsOn: mcCopyLambdaFiles
+    DependsOn: CopyLambdaFiles
     Properties:
       Code:
-        S3Bucket: !Ref mcLambdaSourceFilesS3
+        S3Bucket: !Ref LambdaSourceFilesS3
         S3Key: gaming_server_start_stop-v1_0.zip
       Description: Lambda function to control gaming server instances
       Environment:
@@ -936,30 +936,30 @@ Resources:
           small: t3a.small
           medium: t3a.medium
           large: t3a.large
-          stepfunctionarn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-mcStateMachine'
+          stepfunctionarn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-state-machine'
       Handler: lambda_function.lambda_handler
       MemorySize: 128
       PackageType: Zip
-      Role: !GetAtt mcStartStopLambdaIamRole.Arn
+      Role: !GetAtt StartStopLambdaIamRole.Arn
       Runtime: python3.8
       Timeout: 10
 
-  mcUpdateDnsLambda:
+  UpdateDnsLambda:
     Type: 'AWS::Lambda::Function'
-    DependsOn: mcCopyLambdaFiles
+    DependsOn: CopyLambdaFiles
     Properties:
       Code:
-        S3Bucket: !Ref mcLambdaSourceFilesS3
-        S3Key: mcUpdateDNS-v1_0.zip
+        S3Bucket: !Ref LambdaSourceFilesS3
+        S3Key: update-dns-v1_0.zip
       Description: Lambda to update DNS
       Handler: lambda_function.lambda_handler
       MemorySize: 128
       PackageType: Zip
-      Role: !GetAtt mcUpdateDnsLambdaIamRole.Arn
+      Role: !GetAtt UpdateDnsLambdaIamRole.Arn
       Runtime: python3.8
       Timeout: 10
 
-  mcLambdaSourceFilesS3:
+  LambdaSourceFilesS3:
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: Private
@@ -969,10 +969,10 @@ Resources:
           IgnorePublicAcls: True
           RestrictPublicBuckets: True
       LoggingConfiguration:
-        DestinationBucketName: !Ref mcLoggingBucket
-        LogFilePrefix: mcS3BucketLogs/
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: s3-bucket-logs/
 
-  mcS3Bucket:
+  S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: Private
@@ -982,27 +982,27 @@ Resources:
           IgnorePublicAcls: True
           RestrictPublicBuckets: True
       LoggingConfiguration:
-        DestinationBucketName: !Ref mcLoggingBucket
-        LogFilePrefix: mcS3BucketLogs/
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: s3-bucket-logs/
 
-  mcS3BucketPolicy:
+  S3BucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref mcS3Bucket
+      Bucket: !Ref S3Bucket
       PolicyDocument:
         Statement:
           - Action:
               - 's3:GetObject'
             Effect: Allow
             Resource: !Sub
-              - 'arn:aws:s3:::${mcS3Bucket}/*'
-              - mcS3Bucket: !Ref mcS3Bucket
+              - 'arn:aws:s3:::${S3Bucket}/*'
+              - S3Bucket: !Ref S3Bucket
             Principal:
               AWS: !Sub
                 - 'arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OriginAccessiId}'
-                - OriginAccessiId: !Ref mcOriginAccessId
+                - OriginAccessiId: !Ref OriginAccessId
 
-  mcLoggingBucket:
+  LoggingBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketEncryption:
@@ -1015,23 +1015,23 @@ Resources:
         Rules:
           - ObjectOwnership: BucketOwnerPreferred
 
-  mcOriginAccessId:
+  OriginAccessId:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
       CloudFrontOriginAccessIdentityConfig:
         Comment: Origin Access ID for front end control site
 
-  mcAcmCertificate:
+  AcmCertificate:
     Type: Custom::AcmCertificate
     Condition: FrontEndDomainIsSet
     Properties:
-      ServiceToken: !GetAtt mcAcmCertificateLambda.Arn
+      ServiceToken: !GetAtt AcmCertificateLambda.Arn
       DomainName: !Ref FrontEndDomain
       HostedZoneId: !Ref HostedZoneId
 
-  mcCloudFront:
+  CloudFront:
     Type: AWS::CloudFront::Distribution
-    DependsOn: mcCopyFrontEndFiles
+    DependsOn: CopyFrontEndFiles
     Properties:
       DistributionConfig:
         Aliases: !If
@@ -1045,30 +1045,30 @@ Resources:
             - HEAD
             - OPTIONS
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          TargetOriginId: mcCloudFrontS3OriginID
+          TargetOriginId: CloudFrontS3OriginID
           ViewerProtocolPolicy: redirect-to-https
         DefaultRootObject: index.html
         Enabled: True
         HttpVersion: http2
         IPV6Enabled: true
         Logging:
-          Bucket: !GetAtt mcLoggingBucket.DomainName
+          Bucket: !GetAtt LoggingBucket.DomainName
           IncludeCookies: True
-          Prefix: mcCloudFrontLogs/
+          Prefix: cloudfront-logs/
         Origins:
-            - DomainName: !Sub ${mcS3Bucket}.s3.${AWS::Region}.amazonaws.com
-              Id: mcCloudFrontS3OriginID
+            - DomainName: !Sub ${S3Bucket}.s3.${AWS::Region}.amazonaws.com
+              Id: CloudFrontS3OriginID
               S3OriginConfig:
-                OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${mcOriginAccessId}
+                OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessId}
         PriceClass: PriceClass_100
         ViewerCertificate: !If
           - FrontEndDomainIsSet
-          - AcmCertificateArn: !GetAtt mcAcmCertificate.CertificateArn
+          - AcmCertificateArn: !GetAtt AcmCertificate.CertificateArn
             SslSupportMethod: sni-only
             MinimumProtocolVersion: TLSv1.2_2021
           - CloudFrontDefaultCertificate: True
 
-  mcFrontEndRoute53Alias:
+  FrontEndRoute53Alias:
     Type: AWS::Route53::RecordSet
     Condition: FrontEndDomainIsSet
     Properties:
@@ -1076,47 +1076,47 @@ Resources:
       Name: !Ref FrontEndDomain
       Type: A
       AliasTarget:
-        DNSName: !GetAtt mcCloudFront.DomainName
+        DNSName: !GetAtt CloudFront.DomainName
         HostedZoneId: Z2FDTNDATAQYW2
         EvaluateTargetHealth: true
 
-  mcStartStopLambdaPermissionGetInfo:
+  StartStopLambdaPermissionGetInfo:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !GetAtt mcStartStopLambda.Arn
+      FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${mcControlApi}/*/GET/getinfo
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/getinfo
 
-  mcStartStopLambdaPermissionStart:
+  StartStopLambdaPermissionStart:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !GetAtt mcStartStopLambda.Arn
+      FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${mcControlApi}/*/GET/start
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/start
 
-  mcStartStopLambdaPermissionStop:
+  StartStopLambdaPermissionStop:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !GetAtt mcStartStopLambda.Arn
+      FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${mcControlApi}/*/GET/stop
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/stop
 
-  mcStartStopLambdaPermissionResize:
+  StartStopLambdaPermissionResize:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !GetAtt mcStartStopLambda.Arn
+      FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${mcControlApi}/*/GET/resize
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/resize
 
-  mcCopyFrontEndFiles:
+  CopyFrontEndFiles:
     Type: Custom::WebFileCopy
     Properties:
-      ServiceToken: !GetAtt mcCopyToS3Lambda.Arn
-      targetS3Bucket: !Ref mcS3Bucket
+      ServiceToken: !GetAtt CopyToS3Lambda.Arn
+      targetS3Bucket: !Ref S3Bucket
       sourceUrls:
         - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/styles.css
           content-type: text/css
@@ -1133,13 +1133,13 @@ Resources:
           content-type: application/javascript
           folder: js
 
-  mcCopyLambdaFiles:
+  CopyLambdaFiles:
     Type: Custom::WebFileCopy
     Properties:
-      ServiceToken: !GetAtt mcCopyToS3Lambda.Arn
-      targetS3Bucket: !Ref mcLambdaSourceFilesS3
+      ServiceToken: !GetAtt CopyToS3Lambda.Arn
+      targetS3Bucket: !Ref LambdaSourceFilesS3
       sourceUrls:
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Lambda/mcUpdateDNS-v1_0.py
+        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Lambda/update-dns-v1_0.py
           content-type: application/zip
           zip: True
           filename: lambda_function.py
@@ -1148,60 +1148,60 @@ Resources:
           zip: True
           filename: lambda_function.py
 
-  mcUpdateConfig:
+  UpdateConfig:
     Type: Custom::UpdateFileInS3
     Properties:
-      ServiceToken: !GetAtt mcUpdateConfigLambda.Arn
+      ServiceToken: !GetAtt UpdateConfigLambda.Arn
       configfile: js/config.js
-      S3Bucket: !Ref mcS3Bucket
+      S3Bucket: !Ref S3Bucket
       cloudfrontURL: !If
         - FrontEndDomainIsSet
         - !Sub https://${FrontEndDomain}
-        - !Sub https://${mcCloudFront.DomainName}
-      cognitoclientid: !Ref mcCognitoAppClient
-      cognitodomain: !Sub ${mcUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
-      apiurl: !Sub https://${mcControlApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+        - !Sub https://${CloudFront.DomainName}
+      cognitoclientid: !Ref CognitoAppClient
+      cognitodomain: !Sub ${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+      apiurl: !Sub https://${ControlApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
       idtagname: !Ref IdTagName
       idtagvalue: !Ref IdTagValue
       stackname: !Ref AWS::StackName
-      coguserpool: !Ref mcCognitoUserPool
+      coguserpool: !Ref CognitoUserPool
 
 Outputs:
-  mcControlApiUrl:
+  ControlApiUrl:
     Description: This is the URL for the API to control your gaming server instances
-    Value: !Sub https://${mcControlApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+    Value: !Sub https://${ControlApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
 
-  mcCognitoUserPoolId:
+  CognitoUserPoolId:
     Description: Unique user pool ID for the people you want to be able to control your server
-    Value: !Ref mcCognitoUserPool
+    Value: !Ref CognitoUserPool
 
-  mcCloudfrontUrl:
+  CloudfrontUrl:
     Description: The default CloudFront domain for your control website.
-    Value: !Sub https://${mcCloudFront.DomainName}
+    Value: !Sub https://${CloudFront.DomainName}
 
-  mcControlWebsiteUrl:
+  ControlWebsiteUrl:
     Description: The URL you should use to access your control website - your FrontEndDomain if you set one, otherwise the default CloudFront domain.
     Value: !If
       - FrontEndDomainIsSet
       - !Sub https://${FrontEndDomain}
-      - !Sub https://${mcCloudFront.DomainName}
+      - !Sub https://${CloudFront.DomainName}
 
-  mcS3Bucket:
+  S3Bucket:
     Description: The name of the created S3 bucket
-    Value: !GetAtt mcS3Bucket.Arn
+    Value: !GetAtt S3Bucket.Arn
 
-  mcTagName:
-    Description: Tag name used.  This should not have been changed, and should be mcServerFinder
+  TagName:
+    Description: Tag name used.  This should not have been changed, and should be ServerFinder
     Value: !Ref IdTagName
 
-  mcTagValue:
+  TagValue:
     Description: Tag value used to identify which servers this control panel manages. Must match the value entered on every Server stack.
     Value: !Ref IdTagValue
 
-  mcCognitoDomainName:
+  CognitoDomainName:
     Description: The domain name for the Cognito hosted UI
-    Value: !Sub ${mcUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+    Value: !Sub ${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
 
-  mcCognitoClientID:
+  CognitoClientID:
     Description: The clientID for the Cognito user pool
-    Value: !Ref mcCognitoAppClient
+    Value: !Ref CognitoAppClient

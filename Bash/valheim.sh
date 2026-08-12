@@ -15,8 +15,8 @@ sudo ./aws/install
 VHPW=$(echo $RANDOM | md5sum | head -c 20)
 
 #get stackname created by user data script and update SSM parameter name with this to make it unique
-STACKNAME=$(</tmp/mcParamName.txt)
-PARAMNAME=mcValheimPW-$STACKNAME
+STACKNAME=$(</tmp/paramName.txt)
+PARAMNAME=game-password-$STACKNAME
 
 #put random string into parameter store as encrypted string value
 aws ssm put-parameter --name $PARAMNAME --value $VHPW --type "SecureString" --overwrite
