@@ -46,26 +46,26 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             statusmessage = "If this message appears, something has gone very wrong"
         except:
             print("start failed")
-            statusmessage = "Couldn't start servers, please try again later"
+            statusmessage = "Couldn't start server, please try again later"
             return(statusmessage,info)
         try:
             statemachineresponse = updateDnsStateFunc({'Instances': targetInstances})
             print(statemachineresponse)
-            statusmessage = "Started Servers and updated DNS successfully"
+            statusmessage = "Started server and updated DNS successfully"
         except:
-            statusmessage = "Servers started, but DNS update failed - please wait a few minutes and try again or check your hosted zone is setup correctly"
+            statusmessage = "Server started, but DNS update failed - please wait a few minutes and try again or check your hosted zone is setup correctly"
     elif event['command'] == "stop":
         try:
             ec2.stop_instances(InstanceIds=instanceIds)
-            statusmessage = "Stopped Servers"
+            statusmessage = "Stopped server"
         except:
-            statusmessage = "Stopping servers failed - please wait a few minutes and try again"  
+            statusmessage = "Stopping server failed - please wait a few minutes and try again"  
     elif event['command'] == "getInfo":
             statusmessage = "No action, just getting info"
     elif event['command'] == "reSize":
         for i in targetInstances:
             if i['State'] != "stopped":
-                statusmessage = "Your servers are not stopped. Please stop your servers and retry resizing them"
+                statusmessage = "Your server is not stopped. Please stop it and retry resizing"
                 return (statusmessage,info)
             try:
                 for i in instanceIds:
@@ -77,11 +77,11 @@ def lambda_handler(event, context): #standard function called on lambda invocati
                     except:
                         serverResizeCheck = "NOK"
                 if serverResizeCheck == "OK":
-                    statusmessage = "Servers have been resized - please note they are currently stopped."
+                    statusmessage = "Server has been resized - please note it is currently stopped."
                 else:
-                    statusmessage = "There was an issue resizing one of your servers.  Make sure your target instance type is compatible (e.g. ARM bases servers such as T3g servers cannot be resized to x86 server types such as T3a servers"
+                    statusmessage = "There was an issue resizing your server.  Make sure your target instance type is compatible (e.g. ARM bases servers such as T3g servers cannot be resized to x86 server types such as T3a servers"
             except:
-                    statusmessage = "Something went wrong with resizing servers, please try again later"
+                    statusmessage = "Something went wrong with resizing your server, please try again later"
     else:
         statusmessage = "Error - invalid invocation event received"
     return(statusmessage,info)

@@ -2,12 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 
 AWSTemplateFormatVersion: 2010-09-09
-Description: >-
-  Personal Gaming Server Manager - Common networking infrastructure (VPC/Subnet/Internet Gateway).
-  Deploy this stack once per account+region, before any Server or Control Panel stack.
-  Its VpcId/SubnetId are exported under fixed names (CommonInfraVpcId/CommonInfraSubnetId) and
-  imported by every Server stack - Fn::ImportValue only resolves within the same account+region, so
-  this stack must live in the same account+region as the Server stacks that depend on it.
+Description: Personal Gaming Server Manager - shared VPC/networking infrastructure.
 
 Resources:
   InternetGateway:

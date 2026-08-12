@@ -2,13 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 
 AWSTemplateFormatVersion: 2010-09-09
-Description: >-
-  Personal Gaming Server Manager - shared control panel (Cognito login, control API, start/stop/DNS
-  Lambdas, CloudFront web site). Deploy this stack once - it controls every EC2 game server tagged
-  with IdTagName=IdTagValue, discovered purely at Lambda runtime via an EC2 tag filter, so it has no
-  CloudFormation-level dependency on any Server stack. IdTagName/IdTagValue here must match the
-  values entered on every Server stack you want this control panel to manage, and HostedZoneId here
-  must match the HostedZoneId used on those Server stacks if you want DNS updates to work.
+Description: Personal Gaming Server Manager - shared control panel (login, control API, web site).
 
 Metadata:
   'AWS::CloudFormation::Interface':
@@ -816,13 +810,12 @@ Resources:
               properties = event['ResourceProperties']
               configfile = properties['configfile']
               bucket = properties['S3Bucket']
-              if event['RequestType'] == 'Create':
+              if event['RequestType'] in ('Create', 'Update'):
                   try:
                       with open('/tmp/configuration.js', 'wb') as f:
                           s3.download_fileobj(bucket, configfile, f)
-                      f.close()
-                      f = open('/tmp/configuration.js','rt')
-                      configdata = f.read()
+                      with open('/tmp/configuration.js', 'rt') as f:
+                          configdata = f.read()
                       configdata = configdata.replace('REPLACE-WITH-CFURL', properties['cloudfrontURL'])
                       configdata = configdata.replace('REPLACE-WITH-COGNITO', properties['cognitoclientid'])
                       configdata = configdata.replace('REPLACE-WITH-COGDOMAIN', properties['cognitodomain'])
@@ -831,16 +824,15 @@ Resources:
                       configdata = configdata.replace('REPLACE-WITH-IDTAGVALUE', properties['idtagvalue'])
                       configdata = configdata.replace('REPLACE-WITH-STACKNAME', properties['stackname'])
                       configdata = configdata.replace('REPLACE-WITH-POOLS-ID', properties['coguserpool'])
-                      f.close()
-                      f = open('/tmp/configuration.js','wt')
-                      f.write(configdata)
-                      f.close()
+                      with open('/tmp/configuration.js', 'wt') as f:
+                          f.write(configdata)
                       s3.put_object(Bucket=bucket,Key=configfile,Body=open('/tmp/configuration.js','rb'),ContentType="application/javascript")
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Updated config file.'})
                   except Exception as e:
                       print(e)
                       cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failed to copy files'})
-              cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Update or Delete action not Supported.'})
+              else:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Delete action not supported - nothing to do.'})
       Description: Custom resource lambda to update config files on stack build complete
       Role: !GetAtt CustomResourceLambdaIamRole.Arn
       Handler: index.lambda_handler
@@ -1191,7 +1183,7 @@ Outputs:
     Value: !GetAtt S3Bucket.Arn
 
   TagName:
-    Description: Tag name used.  This should not have been changed, and should be ServerFinder
+    Description: Tag name used.  This should not have been changed, and should be game-server-finder
     Value: !Ref IdTagName
 
   TagValue:

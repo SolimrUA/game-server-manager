@@ -27,3 +27,4 @@ Notes:
 - `Domain` is optional - pass `Domain=""` if you don't want a custom DNS name for this server (you'll get a fresh IP every time you stop/start it instead).
 - `HostedZoneId` must match the value used on your Control Panel stack.
 - `GamingUDPTrafficPortStart`/`GamingUDPTrafficPortEnd` are omitted - they default to `2456`/`2458`, which is what Valheim needs.
+- After the stack finishes, the instance installs Valheim on first boot and then **shuts itself down**. Start it from the control panel when you're ready to play - that's also what triggers the DNS record to be created/updated, so every server's first-ever appearance online goes through the same start flow (rather than the record lagging behind an instance that was already running).

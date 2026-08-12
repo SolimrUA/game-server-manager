@@ -30,3 +30,4 @@ Notes:
 - `Domain` is optional - pass `Domain=""` if you don't want a custom DNS name for this server.
 - `HostedZoneId` must match the value used on your Control Panel stack.
 - The install script pins a specific Vintage Story version (`VSVERSION` near the top of `Bash/vintagestory.sh`) - bump it there if you want a newer release.
+- After the stack finishes, the instance installs Vintage Story on first boot and then **shuts itself down**. Start it from the control panel when you're ready to play - that's also what triggers the DNS record to be created/updated, so every server's first-ever appearance online goes through the same start flow (rather than the record lagging behind an instance that was already running).

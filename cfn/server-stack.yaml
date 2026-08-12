@@ -2,16 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 
 AWSTemplateFormatVersion: 2010-09-09
-Description: >-
-  Personal Gaming Server Manager - one game server instance and everything scoped to it
-  (Security Group, IAM role, generated-password SSM parameter, EBS backups, auto shutdown).
-  Deploy one of these per game server (e.g. once for Valheim, again for Vintage Story).
-  Requires an CommonInfra stack deployed first in the same account+region (imports its
-  VpcId/SubnetId). Has no dependency on the Control Panel stack - the shared control panel
-  discovers this instance purely via the IdTagName/IdTagValue tag at runtime, so IdTagName
-  and IdTagValue here must match the values entered on the Control Panel stack, and
-  HostedZoneId here must match the Control Panel stack's HostedZoneId if you want DNS updates
-  to work.
+Description: Personal Gaming Server Manager - one game server instance and its dedicated resources.
 
 Metadata:
   'AWS::CloudFormation::Interface':
@@ -292,6 +283,7 @@ Resources:
             chmod +x gameserverinstall.sh
             ./gameserverinstall.sh
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+            shutdown -h now
           - GameServer: !Ref GameServer
 
   PwordParameter:
@@ -631,7 +623,7 @@ Outputs:
     Value: !Ref EC2Instance
 
   TagName:
-    Description: Tag name used.  This should not have been changed, and should be ServerFinder
+    Description: Tag name used.  This should not have been changed, and should be game-server-finder
     Value: !Ref IdTagName
 
   TagValue:

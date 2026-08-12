@@ -311,6 +311,11 @@ tr.mcServerDetail td {
     font-weight: bold;
     float: right;
     cursor: pointer;
+    transition: 0.3s;
+}
+
+.alert .closebtn:hover {
+    color: black;
 }
 
 /* ############## Footer ############### */
@@ -325,33 +330,4 @@ tr.mcServerDetail td {
     text-align: center;
     padding: 6px 0;
 }
-
-/* ################ Alerts ################### */
- /* The alert message box */
- .alert {
-    padding: 20px;
-    background-color: #FF9901;
-    /* background-color: #FF9900; */
-    color: #00A4E4;
-    /* color: #FFFFFF; */
-    margin-bottom: 15px;
-  }
-  
-  /* The close button */
-  .closebtn {
-    margin-left: 15px;
-    color: #FFFFFF;
-    /* color: #FFFFFF; */
-    font-weight: bold;
-    float: right;
-    font-size: 22px;
-    line-height: 20px;
-    cursor: pointer;
-    transition: 0.3s;
-  }
-  
-  /* When moving the mouse over the close button */
-  .closebtn:hover {
-    color: black;
-  } 
 
