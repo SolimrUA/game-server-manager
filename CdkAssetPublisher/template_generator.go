@@ -15,26 +15,86 @@ func NewTemplateGenerator(config Config) TemplateGenerator {
 	return TemplateGenerator{config: config}
 }
 
+type templatePass func(TemplateGenerator, string) string
+
+type templateSpec struct {
+	name       string
+	sourcePath string
+	outputPath string
+	passes     []templatePass
+}
+
+func (generator TemplateGenerator) templateSpecs() []templateSpec {
+	c := generator.config
+	return []templateSpec{
+		{
+			name:       "common",
+			sourcePath: c.CommonSourceTemplatePath,
+			outputPath: c.CommonOutputTemplatePath,
+		},
+		{
+			name:       "server",
+			sourcePath: c.ServerSourceTemplatePath,
+			outputPath: c.ServerOutputTemplatePath,
+			passes:     []templatePass{TemplateGenerator.replaceBashURLs},
+		},
+		{
+			name:       "controlpanel",
+			sourcePath: c.ControlPanelSourceTemplatePath,
+			outputPath: c.ControlPanelOutputTemplatePath,
+			passes: []templatePass{
+				TemplateGenerator.replaceFrontendURLs,
+				TemplateGenerator.replaceLambdaCodeBlocks,
+				TemplateGenerator.removeCopyLambdaDependency,
+				TemplateGenerator.disableLambdaFileCopy,
+			},
+		},
+	}
+}
+
 func (generator TemplateGenerator) Write() error {
-	template, err := os.ReadFile(generator.config.SourceTemplatePath)
+	for _, spec := range generator.templateSpecs() {
+		if err := generator.writeSpec(spec); err != nil {
+			return fmt.Errorf("%s template: %w", spec.name, err)
+		}
+	}
+	return nil
+}
+
+func (generator TemplateGenerator) writeSpec(spec templateSpec) error {
+	template, err := os.ReadFile(spec.sourcePath)
 	if err != nil {
 		return err
 	}
 
 	output := string(template)
-	output = strings.ReplaceAll(output,
-		"https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Bash/valheim.sh",
-		generator.s3ObjectURL("Bash/valheim.sh"),
-	)
-	output = generator.replaceFrontendURLs(output)
-	output = generator.replaceLambdaCodeBlocks(output)
-	output = generator.removeCopyLambdaDependency(output)
-	output = generator.disableLambdaFileCopy(output)
+	for _, pass := range spec.passes {
+		output = pass(generator, output)
+	}
 
-	if err := os.MkdirAll(filepath.Dir(generator.config.OutputTemplatePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(spec.outputPath), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(generator.config.OutputTemplatePath, []byte(output), 0644)
+	return os.WriteFile(spec.outputPath, []byte(output), 0644)
+}
+
+func (generator TemplateGenerator) replaceBashURLs(template string) string {
+	entries, err := os.ReadDir("../Bash")
+	if err != nil {
+		panic(err)
+	}
+
+	output := template
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		output = strings.ReplaceAll(output,
+			"https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Bash/"+entry.Name(),
+			generator.s3ObjectURL("Bash/"+entry.Name()),
+		)
+	}
+	return output
 }
 
 func (generator TemplateGenerator) replaceFrontendURLs(template string) string {

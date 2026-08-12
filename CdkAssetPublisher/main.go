@@ -65,8 +65,14 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 		Prune:                jsii.Bool(false),
 	})
 
-	awscdk.NewCfnOutput(stack, jsii.String("GeneratedTemplatePath"), &awscdk.CfnOutputProps{
-		Value: jsii.String(config.OutputTemplatePath),
+	awscdk.NewCfnOutput(stack, jsii.String("GeneratedCommonTemplatePath"), &awscdk.CfnOutputProps{
+		Value: jsii.String(config.CommonOutputTemplatePath),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("GeneratedServerTemplatePath"), &awscdk.CfnOutputProps{
+		Value: jsii.String(config.ServerOutputTemplatePath),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("GeneratedControlPanelTemplatePath"), &awscdk.CfnOutputProps{
+		Value: jsii.String(config.ControlPanelOutputTemplatePath),
 	})
 
 	return stack
@@ -100,7 +106,7 @@ func prepareAssets(config Config) error {
 		return err
 	}
 
-	if err := copyFile("../Bash/valheim.sh", filepath.Join(config.LocalBashBuildDir, "valheim.sh")); err != nil {
+	if err := copyDir("../Bash", config.LocalBashBuildDir); err != nil {
 		return err
 	}
 

@@ -1,0 +1,78 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Personal Gaming Server Manager - Common networking infrastructure (VPC/Subnet/Internet Gateway).
+  Deploy this stack once per account+region, before any Server or Control Panel stack.
+  Its VpcId/SubnetId are exported under fixed names (mcCommonInfraVpcId/mcCommonInfraSubnetId) and
+  imported by every Server stack - Fn::ImportValue only resolves within the same account+region, so
+  this stack must live in the same account+region as the Server stacks that depend on it.
+
+Resources:
+  mcInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: CF Gamine Server IG
+
+  mcRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: CF Gaming Server Route Table
+      VpcId: !Ref mcVPC
+
+  mcRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref mcInternetGateway
+      RouteTableId: !Ref mcRouteTable
+
+  mcSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: CF Gaming Server Subnet
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref mcVPC
+
+  mcVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Personal Gaming Server VPC
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: 'true'
+      EnableDnsSupport: 'true'
+
+  mcIgAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref mcVPC
+      InternetGatewayId: !Ref mcInternetGateway
+
+  mcRouteTblAttach:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref mcRouteTable
+      SubnetId: !Ref mcSubnet
+
+Outputs:
+  mcVpcId:
+    Description: VPC ID - imported by every Server stack via Fn::ImportValue mcCommonInfraVpcId
+    Value: !Ref mcVPC
+    Export:
+      Name: mcCommonInfraVpcId
+
+  mcSubnetId:
+    Description: Subnet ID - imported by every Server stack via Fn::ImportValue mcCommonInfraSubnetId
+    Value: !Ref mcSubnet
+    Export:
+      Name: mcCommonInfraSubnetId

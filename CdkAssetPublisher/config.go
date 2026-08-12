@@ -20,8 +20,12 @@ const localConfigFile = ".env"
 // ASSET_KEY_PREFIX=personal-game-server-manager/v1
 //
 // Optional path overrides, relative to CdkAssetPublisher/.
-// SOURCE_TEMPLATE_PATH=../mcCFNGamingServerSolution.YAML
-// OUTPUT_TEMPLATE_PATH=../build/mcCFNGamingServerSolution.assets.yaml
+// COMMON_SOURCE_TEMPLATE_PATH=../cfn/mcCommonInfra.yaml
+// COMMON_OUTPUT_TEMPLATE_PATH=../build/mcCommonInfra.assets.yaml
+// SERVER_SOURCE_TEMPLATE_PATH=../cfn/mcServerStack.yaml
+// SERVER_OUTPUT_TEMPLATE_PATH=../build/mcServerStack.assets.yaml
+// CONTROLPANEL_SOURCE_TEMPLATE_PATH=../cfn/mcControlPanel.yaml
+// CONTROLPANEL_OUTPUT_TEMPLATE_PATH=../build/mcControlPanel.assets.yaml
 // LOCAL_ASSET_BUILD_DIR=../build/assets
 // LOCAL_LAMBDA_BUILD_DIR=../build/assets/Lambda
 // LOCAL_FRONTEND_BUILD_DIR=../build/assets/FrontEnd
@@ -35,8 +39,13 @@ type Config struct {
 	CreateAssetBucket bool
 	AssetKeyPrefix    string
 
-	SourceTemplatePath    string
-	OutputTemplatePath    string
+	CommonSourceTemplatePath       string
+	CommonOutputTemplatePath       string
+	ServerSourceTemplatePath       string
+	ServerOutputTemplatePath       string
+	ControlPanelSourceTemplatePath string
+	ControlPanelOutputTemplatePath string
+
 	LocalAssetBuildDir    string
 	LocalLambdaBuildDir   string
 	LocalFrontendBuildDir string
@@ -49,13 +58,19 @@ func LoadConfig() (Config, error) {
 	}
 
 	config := Config{
-		AwsAccount:         requiredEnv("AWS_ACCOUNT"),
-		AwsRegion:          requiredEnv("AWS_REGION"),
-		AssetBucketName:    requiredEnv("ASSET_BUCKET_NAME"),
-		CreateAssetBucket:  boolEnv("CREATE_ASSET_BUCKET", true),
-		AssetKeyPrefix:     stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
-		SourceTemplatePath: stringEnv("SOURCE_TEMPLATE_PATH", "../mcCFNGamingServerSolution.YAML"),
-		OutputTemplatePath: stringEnv("OUTPUT_TEMPLATE_PATH", "../build/mcCFNGamingServerSolution.assets.yaml"),
+		AwsAccount:        requiredEnv("AWS_ACCOUNT"),
+		AwsRegion:         requiredEnv("AWS_REGION"),
+		AssetBucketName:   requiredEnv("ASSET_BUCKET_NAME"),
+		CreateAssetBucket: boolEnv("CREATE_ASSET_BUCKET", true),
+		AssetKeyPrefix:    stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
+
+		CommonSourceTemplatePath:       stringEnv("COMMON_SOURCE_TEMPLATE_PATH", "../cfn/mcCommonInfra.yaml"),
+		CommonOutputTemplatePath:       stringEnv("COMMON_OUTPUT_TEMPLATE_PATH", "../build/mcCommonInfra.assets.yaml"),
+		ServerSourceTemplatePath:       stringEnv("SERVER_SOURCE_TEMPLATE_PATH", "../cfn/mcServerStack.yaml"),
+		ServerOutputTemplatePath:       stringEnv("SERVER_OUTPUT_TEMPLATE_PATH", "../build/mcServerStack.assets.yaml"),
+		ControlPanelSourceTemplatePath: stringEnv("CONTROLPANEL_SOURCE_TEMPLATE_PATH", "../cfn/mcControlPanel.yaml"),
+		ControlPanelOutputTemplatePath: stringEnv("CONTROLPANEL_OUTPUT_TEMPLATE_PATH", "../build/mcControlPanel.assets.yaml"),
+
 		LocalAssetBuildDir: stringEnv("LOCAL_ASSET_BUILD_DIR", "../build/assets"),
 	}
 
@@ -110,11 +125,13 @@ func loadEnvFile(path string) error {
 
 func validateConfig(config Config) error {
 	for label, path := range map[string]string{
-		"OUTPUT_TEMPLATE_PATH":     config.OutputTemplatePath,
-		"LOCAL_ASSET_BUILD_DIR":    config.LocalAssetBuildDir,
-		"LOCAL_LAMBDA_BUILD_DIR":   config.LocalLambdaBuildDir,
-		"LOCAL_FRONTEND_BUILD_DIR": config.LocalFrontendBuildDir,
-		"LOCAL_BASH_BUILD_DIR":     config.LocalBashBuildDir,
+		"COMMON_OUTPUT_TEMPLATE_PATH":       config.CommonOutputTemplatePath,
+		"SERVER_OUTPUT_TEMPLATE_PATH":       config.ServerOutputTemplatePath,
+		"CONTROLPANEL_OUTPUT_TEMPLATE_PATH": config.ControlPanelOutputTemplatePath,
+		"LOCAL_ASSET_BUILD_DIR":             config.LocalAssetBuildDir,
+		"LOCAL_LAMBDA_BUILD_DIR":            config.LocalLambdaBuildDir,
+		"LOCAL_FRONTEND_BUILD_DIR":          config.LocalFrontendBuildDir,
+		"LOCAL_BASH_BUILD_DIR":              config.LocalBashBuildDir,
 	} {
 		if err := requireRepoBuildPath(label, path); err != nil {
 			return err

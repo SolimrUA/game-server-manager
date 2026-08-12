@@ -2,17 +2,19 @@
 
 This Go CDK app packages local deployment assets and publishes them to S3:
 
-- `Bash/valheim.sh`
+- all files under `Bash/` (one "game cartridge" install script per game server)
 - all files under `FrontEnd/`
 - zipped Lambda packages from `Lambda/*.py`, each with `lambda_function.py` inside the ZIP
 
-It also writes a generated CloudFormation deployment template:
+It also writes three generated CloudFormation deployment templates, one per stack in `cfn/`:
 
 ```text
-build/mcCFNGamingServerSolution.assets.yaml
+build/mcCommonInfra.assets.yaml
+build/mcServerStack.assets.yaml
+build/mcControlPanel.assets.yaml
 ```
 
-That generated template references the configured S3 bucket instead of GitHub.
+Each generated template references the configured S3 bucket instead of GitHub where relevant (the Common template needs no substitutions, Server only needs its Bash cartridge URL rewritten, Control Panel needs the frontend/Lambda URL rewrites).
 The original solution fetches the Bash and frontend files by HTTPS, so this app grants public `s3:GetObject` to the configured asset prefix. Keep this bucket/prefix for deployment assets only.
 
 ## Configure
@@ -49,12 +51,12 @@ The CDK deploy uploads assets into:
 s3://<AssetBucketName>/<AssetKeyPrefix>/
 ```
 
-## Deploy Game Server
+## Deploy the solution
 
-After `cdk deploy`, create the game-server CloudFormation stack from:
+After `cdk deploy`, create the three CloudFormation stacks from the generated templates, **in this order**:
 
-```text
-../build/mcCFNGamingServerSolution.assets.yaml
-```
+1. `../build/mcCommonInfra.assets.yaml` - VPC/networking, deployed once per account+region.
+2. `../build/mcControlPanel.assets.yaml` - Cognito, control API, start/stop/DNS Lambdas, CloudFront site. Deployed once.
+3. `../build/mcServerStack.assets.yaml` - one game server. Deploy again for each additional server (e.g. once for Valheim, again for Vintage Story).
 
-That template is the original solution template patched to use your S3-hosted assets.
+`IdTagName`/`IdTagValue` must be entered identically on the Control Panel stack and every Server stack - that tag is how the Control Panel discovers which EC2 instances to manage. `HostedZoneId` must likewise match between the Control Panel stack and any Server stack that sets a `Domain`.
