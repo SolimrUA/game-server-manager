@@ -6,6 +6,8 @@ In the below blog post we will show you how to achieve both a low cost and high 
 
 More details and instructions on this solution can be found on the AWS Gametech blog here: https://aws.amazon.com/blogs/gametech//hosting-your-own-dedicated-valheim-server-in-the-cloud/
 
+This project is based on [aws-samples/personal-game-server-manager](https://github.com/aws-samples/personal-game-server-manager). It started as a fork but has since been substantially rewritten (multi-stack architecture, multi-server support, the CDK asset publisher, and more), so it's now maintained here as a standalone repository rather than a fork.
+
 ## Architecture
 
 The solution is split into three CloudFormation templates under [`cfn/`](cfn/):
