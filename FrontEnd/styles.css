@@ -1,0 +1,357 @@
+/* 
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
+*/
+
+/* -- Palette -- */
+/* White       #FFFFFF */
+/* Grey-1 (bg) #F4F5F7 */
+/* Grey-2 (ln) #E4E7EB */
+/* Grey-3 (tx) #8A94A6 */
+/* Dark header #1B2430 */
+/* Cyan        #18BEFF */
+/* Cyan-dark   #00A4E4 */
+
+:root {
+    --cyan: #18BEFF;
+    --cyan-dark: #00A4E4;
+    --grey-1: #F4F5F7;
+    --grey-2: #E4E7EB;
+    --grey-3: #8A94A6;
+    --dark: #1B2430;
+    --text: #1B2430;
+    --white: #FFFFFF;
+}
+
+* { box-sizing: border-box; }
+
+html {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-bottom: 4em;
+}
+
+nav, header, footer {
+    display: block;
+}
+
+body {
+    line-height: 1;
+    margin: 0;
+    background-color: var(--white);
+    color: var(--text);
+}
+
+/* ########## Nav Bar #################### */
+
+nav {
+    width: 100%;
+    margin: 0;
+}
+
+nav ul {
+    background-color: var(--dark);
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+
+ul.top-nav li {
+    list-style: none;
+    float: left;
+}
+
+ul.top-nav li.top-nav-right {
+    list-style: none;
+    float: right;
+}
+
+ul.top-nav li a {
+    display: block;
+    text-decoration: none;
+    min-height: 16px;
+    text-align: center;
+    padding: 14px;
+    color: #A7B0BE;
+    background-color: var(--dark);
+    font-size: 13px;
+}
+
+ul.top-nav li a:hover {
+    background-color: #29303D;
+    color: var(--white);
+}
+
+ul.top-nav li a#signOutBtn,
+ul.top-nav li a#signInBtn {
+    color: var(--cyan);
+    font-weight: 600;
+}
+
+ul.top-nav li.dropdownIcon {
+    display: none;
+}
+
+/* ########## Mobile ######## */
+
+@media screen and (max-width: 680px) {
+    ul.top-nav li:not(:nth-child(1)) {
+        display: none;
+    }
+
+    ul.top-nav li.dropdownIcon {
+        display: block;
+        float: right;
+    }
+
+    ul.top-nav.responsive li.dropdownIcon {
+        position: absolute;
+        top: 0;
+        right: 0;
+    }
+
+    ul.top-nav.responsive {
+        position: relative;
+    }
+
+    ul.top-nav.responsive li {
+        display: inline;
+        float: none;
+    }
+
+    ul.top-nav.responsive li a {
+        display: block;
+        text-align: left;
+    }
+}
+
+/* ############## Page ############## */
+
+main {
+    padding: 24px 28px;
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.page-title {
+    margin-bottom: 16px;
+}
+
+.page-title h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* ############## Buttons ############## */
+
+.btn {
+    border: 1px solid var(--grey-2);
+    background: var(--white);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
+}
+
+.btn:hover {
+    background: var(--grey-1);
+}
+
+.btn:focus {
+    outline: none;
+}
+
+.btn.primary {
+    background: var(--cyan);
+    color: var(--white);
+    border-color: var(--cyan);
+}
+
+.btn.primary:hover {
+    background: var(--cyan-dark);
+}
+
+.btn.stop {
+    background: #3A4557;
+    color: var(--white);
+    border-color: #3A4557;
+}
+
+.btn.stop:hover {
+    background: #29303D;
+}
+
+.btn.start {
+    background: var(--cyan);
+    color: var(--white);
+    border-color: var(--cyan);
+}
+
+.btn.start:hover {
+    background: var(--cyan-dark);
+}
+
+select.mcResizeSelect {
+    border: 1px solid var(--grey-2);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+/* ############## Server Table ############## */
+
+table.mcServerTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+table.mcServerTable thead th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--grey-3);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .04em;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--grey-2);
+    background: var(--grey-1);
+}
+
+table.mcServerTable tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--grey-2);
+}
+
+table.mcServerTable tbody tr.mcServerRow {
+    cursor: pointer;
+}
+
+table.mcServerTable tbody tr.mcServerRow:hover {
+    background: var(--grey-1);
+}
+
+table.mcServerTable tbody tr.mcServerRow.selected {
+    background: #EAF8FF;
+}
+
+.mcChevron {
+    display: inline-block;
+    width: 10px;
+    transition: transform .15s ease;
+    color: var(--grey-3);
+}
+
+tr.mcServerRow.selected .mcChevron {
+    transform: rotate(90deg);
+}
+
+.mcDnsDot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--grey-2);
+}
+
+.mcDnsDot.match { background: var(--cyan); }
+.mcDnsDot.mismatch { background: #E4572E; }
+
+.mcBadge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.mcBadge.running { background: #E1F8EA; color: #16794E; }
+.mcBadge.stopped { background: var(--grey-2); color: var(--grey-3); }
+.mcBadge.pending,
+.mcBadge.stopping,
+.mcBadge.starting,
+.mcBadge.pending-resize { background: #FFF3D6; color: #92650A; }
+
+tr.mcServerDetail td {
+    background: var(--grey-1);
+    padding: 0;
+    border-bottom: 1px solid var(--grey-2);
+}
+
+.mcDetailInner {
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.hidden { display: none; }
+
+.mcLoadingRow td {
+    padding: 20px 12px;
+    text-align: center;
+    color: var(--grey-3);
+}
+
+/* ############# Alert ################ */
+
+.alert {
+    padding: 12px 20px;
+    background-color: var(--dark);
+    color: var(--white);
+    margin: 16px 28px 0;
+    border-radius: 6px;
+}
+
+.alert .closebtn {
+    margin-left: 15px;
+    color: var(--white);
+    font-weight: bold;
+    float: right;
+    cursor: pointer;
+}
+
+/* ############## Footer ############### */
+
+.footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: var(--dark);
+    color: var(--cyan);
+    text-align: center;
+    padding: 6px 0;
+}
+
+/* ################ Alerts ################### */
+ /* The alert message box */
+ .alert {
+    padding: 20px;
+    background-color: #FF9901;
+    /* background-color: #FF9900; */
+    color: #00A4E4;
+    /* color: #FFFFFF; */
+    margin-bottom: 15px;
+  }
+  
+  /* The close button */
+  .closebtn {
+    margin-left: 15px;
+    color: #FFFFFF;
+    /* color: #FFFFFF; */
+    font-weight: bold;
+    float: right;
+    font-size: 22px;
+    line-height: 20px;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+  
+  /* When moving the mouse over the close button */
+  .closebtn:hover {
+    color: black;
+  } 
+
