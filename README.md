@@ -22,6 +22,8 @@ The Control Panel has no CloudFormation-level dependency on any Server stack - i
 
 ## Deploying
 
+None of these stacks fetch anything from the public internet at deploy time - the game install scripts, Lambda code, and web site files all come from an S3 bucket you control, published by `CdkAssetPublisher/`. That's a deliberate choice: nothing here should be downloading and running a script pulled live from GitHub as part of a CloudFormation deploy, and it also means every game server install runs a version of the script you've actually reviewed and pinned, not whatever happens to be on `main` right now.
+
 Deploy in this order, from the repo root, with `aws cloudformation deploy`. The `--stack-name` values below are a fixed convention - copy them as-is (`game-server-<stack type>-cfn`, and `game-server-<game>-cfn` per server). Everything under `--parameter-overrides` is what you'll actually need to edit; placeholders are wrapped in `<...>`.
 
 ### 1. Common - once per account+region
@@ -32,42 +34,13 @@ aws cloudformation deploy \
   --stack-name game-server-common-cfn
 ```
 
-### 2. Control Panel - once
+### 2. Publish your assets - once per account+region
 
-```bash
-aws cloudformation deploy \
-  --template-file cfn/control-panel.yaml \
-  --stack-name game-server-controlpanel-cfn \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides \
-      HostedZoneId=<YOUR_HOSTED_ZONE_ID> \
-      FrontEndDomain=<OPTIONAL_CONTROL_SITE_DOMAIN>
-```
+`CdkAssetPublisher/` is a small Go CDK app that uploads your **local** copy of the game install scripts, Lambda code, and web site files to your own S3 bucket:
 
-`FrontEndDomain` is optional - omit it (or pass `FrontEndDomain=""`) to only use the default CloudFront domain.
-
-### 3. Server - once per game
-
-Each game gets its own short deploy guide with the exact command for that game's ports and cartridge script:
-
-- [Valheim](docs/valheim.md)
-- [Vintage Story](docs/vintagestory.md)
-
-`GameName` names that server's resources (its EC2 `Name` tag becomes `game-server-<GameName>-ec2`) and should match the game in the stack name, e.g. `game-server-valheim-cfn`.
-
-If you have the older single-template version of this solution deployed, note that splitting into three stacks is a breaking change - CloudFormation can't migrate resources out of a live stack into new ones. Back up anything you care about, delete the old stack, then deploy the stacks above.
-
-## Publishing your own copy of the assets (optional, recommended for real use)
-
-By default, `GameServer` (the game's install script), the Lambda code, and the web control site's static files are all fetched straight from this repo's `main` branch on GitHub at deploy time. That's fine for a quick test, but it means every deploy depends on a live call to `raw.githubusercontent.com`, and every game server install runs whatever is on `main` *right now* rather than a version you've reviewed and pinned.
-
-`CdkAssetPublisher/` is a small Go CDK app that instead uploads your **local** copy of these files to your own S3 bucket and rewrites the three templates to reference that bucket, so nothing is fetched from GitHub at deploy time:
-
-- all files under `Bash/` (one install script per game)
+- all files under `scripts/` (one install script per game)
 - all files under `FrontEnd/`
 - zipped Lambda packages from `Lambda/*.py`
-
-### Configure
 
 From `CdkAssetPublisher/`, create a local `.env` (ignored by git) or export the same values in your shell:
 
@@ -81,8 +54,6 @@ ASSET_KEY_PREFIX=personal-game-server-manager/v1
 
 Set `CREATE_ASSET_BUCKET=false` if the bucket already exists and should only be used as a deployment target. If you use an existing bucket, make sure its account-level and bucket-level public access settings allow the generated prefix policy (the app grants public `s3:GetObject` on that one prefix only, since your EC2 instances and CloudFront need to fetch these files over HTTPS - keep this bucket/prefix for deployment assets only).
 
-### Publish
-
 ```bash
 cd CdkAssetPublisher
 go mod tidy
@@ -90,15 +61,39 @@ cdk bootstrap aws://ACCOUNT/REGION
 cdk deploy
 ```
 
-This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and writes three patched templates:
+This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints three outputs you'll need for the next two steps:
 
-```text
-build/common-infra.assets.yaml
-build/server-stack.assets.yaml
-build/control-panel.assets.yaml
+- `AssetBucketName` / `AssetKeyPrefix` - pass straight through as the Control Panel's `AssetsBucketName`/`AssetsKeyPrefix` parameters below.
+- `ScriptsBaseUrl` - the base URL for published game install scripts. A given game's `GameServer` parameter is this plus its script's path, e.g. `<ScriptsBaseUrl>/valheim.sh` or `<ScriptsBaseUrl>/VintageStory/install.sh`.
+
+Re-run `cdk deploy` here any time you change a script, the Lambda code, or the front-end files - it's the only step that needs re-running for content changes; the stacks below just reference this bucket by name/prefix and don't need redeploying unless their own parameters change.
+
+### 3. Control Panel - once
+
+```bash
+aws cloudformation deploy \
+  --template-file cfn/control-panel.yaml \
+  --stack-name game-server-controlpanel-cfn \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+      AssetsBucketName=<AssetBucketName FROM STEP 2> \
+      AssetsKeyPrefix=<AssetKeyPrefix FROM STEP 2> \
+      HostedZoneId=<YOUR_HOSTED_ZONE_ID> \
+      FrontEndDomain=<OPTIONAL_CONTROL_SITE_DOMAIN>
 ```
 
-Use these in place of the `cfn/*.yaml` files in the [Deploying](#deploying) commands above (same stack names, same parameters - the Common template needs no rewriting, Server gets its `GameServer` default rewritten to your S3 copy, Control Panel gets its frontend/Lambda references rewritten).
+`FrontEndDomain` is optional - omit it (or pass `FrontEndDomain=""`) to only use the default CloudFront domain.
+
+### 4. Server - once per game
+
+Each game gets its own short deploy guide with the exact command for that game's ports and cartridge script:
+
+- [Valheim](docs/valheim.md)
+- [Vintage Story](docs/vintagestory.md)
+
+`GameName` names that server's resources (its EC2 `Name` tag becomes `game-server-<GameName>-ec2`) and should match the game in the stack name, e.g. `game-server-valheim-cfn`.
+
+If you have the older single-template version of this solution deployed, note that splitting into three stacks is a breaking change - CloudFormation can't migrate resources out of a live stack into new ones. Back up anything you care about, delete the old stack, then deploy the stacks above.
 
 ## Security
 

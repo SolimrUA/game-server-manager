@@ -77,11 +77,15 @@ Parameters:
     ConstraintDescription: Lowercase letters, numbers, and hyphens only.
     Default: valheim
   GameServer:
-    Description: Please enter the URL for the shell script to install the game server of your choice - we call this the game cartridge URL.  Please note this must be an uncompressed shell script to run on selected AMI (Ubuntu by default).
+    Description: >-
+      URL for the shell script to install the game server of your choice - we call this the game cartridge URL.
+      Must be an uncompressed shell script to run on the selected AMI (Ubuntu by default). Point this at your own
+      published S3 copy (see CdkAssetPublisher in the root README) - there is no default, since this instance
+      downloads and runs whatever is at this URL on first boot, and defaulting to a script fetched from the public
+      internet at deploy time is exactly what this project avoids.
     Type: String
     AllowedPattern: https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)
     ConstraintDescription: 'Must be a valid URL.'
-    Default: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Bash/valheim.sh
   KeyName:
     Description: >-
       This is required so you can access the server.  If there is no option to
@@ -285,7 +289,7 @@ Resources:
             cd /usr/games/install
             wget -O gameserverinstall.sh ${GameServer}
             chmod +x gameserverinstall.sh
-            ./gameserverinstall.sh
+            ./gameserverinstall.sh "${GameServer}"
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
             shutdown -h now
           - GameServer: !Ref GameServer

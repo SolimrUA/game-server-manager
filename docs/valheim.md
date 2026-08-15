@@ -1,6 +1,6 @@
 # Deploying a Valheim server
 
-Requires the Common and Control Panel stacks already deployed - see the root [README.md](../README.md#deploying).
+Requires the Common stack, [published assets](../README.md#2-publish-your-assets---once-per-account-region), and the Control Panel stack already deployed - see the root [README.md](../README.md#deploying).
 
 Valheim only needs UDP (ports 2456-2458, which is the Server template's default), so TCP is left empty.
 
@@ -11,6 +11,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
       GameName=valheim \
+      GameServer=<ScriptsBaseUrl FROM CdkAssetPublisher>/valheim.sh \
       KeyName=<YOUR_EC2_KEY_PAIR> \
       InstanceType=t3a.medium \
       GamingTCPTrafficPortStart="" \
@@ -23,7 +24,7 @@ aws cloudformation deploy \
 
 Notes:
 
-- `GameServer` is omitted above - the template's default already points at [`Bash/valheim.sh`](../Bash/valheim.sh) on GitHub. If you've [published your own assets to S3](../README.md#publishing-your-own-copy-of-the-assets-optional-recommended-for-real-use), use that generated `build/server-stack.assets.yaml` template instead and you can still omit `GameServer` - it'll already point at your S3 copy.
+- `GameServer` has no default and must always be supplied - point it at [`scripts/valheim.sh`](../scripts/valheim.sh) as published to your own S3 bucket by `CdkAssetPublisher` (its `ScriptsBaseUrl` output plus `/valheim.sh`). CloudFormation never fetches this from GitHub.
 - `Domain` is optional - pass `Domain=""` if you don't want a custom DNS name for this server (you'll get a fresh IP every time you stop/start it instead).
 - `HostedZoneId` must match the value used on your Control Panel stack.
 - `GamingUDPTrafficPortStart`/`GamingUDPTrafficPortEnd` are omitted - they default to `2456`/`2458`, which is what Valheim needs.

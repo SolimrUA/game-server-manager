@@ -65,14 +65,17 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 		Prune:                jsii.Bool(false),
 	})
 
-	awscdk.NewCfnOutput(stack, jsii.String("GeneratedCommonTemplatePath"), &awscdk.CfnOutputProps{
-		Value: jsii.String(config.CommonOutputTemplatePath),
+	// These are the values to pass as --parameter-overrides to `aws cloudformation deploy` for
+	// cfn/control-panel.yaml (AssetsBucketName/AssetsKeyPrefix) and cfn/server-stack.yaml (GameServer,
+	// composed as ScriptsBaseUrl + "/<script>", e.g. ScriptsBaseUrl + "/valheim.sh"). See the root README.
+	awscdk.NewCfnOutput(stack, jsii.String("AssetBucketName"), &awscdk.CfnOutputProps{
+		Value: jsii.String(config.AssetBucketName),
 	})
-	awscdk.NewCfnOutput(stack, jsii.String("GeneratedServerTemplatePath"), &awscdk.CfnOutputProps{
-		Value: jsii.String(config.ServerOutputTemplatePath),
+	awscdk.NewCfnOutput(stack, jsii.String("AssetKeyPrefix"), &awscdk.CfnOutputProps{
+		Value: jsii.String(config.AssetKeyPrefix),
 	})
-	awscdk.NewCfnOutput(stack, jsii.String("GeneratedControlPanelTemplatePath"), &awscdk.CfnOutputProps{
-		Value: jsii.String(config.ControlPanelOutputTemplatePath),
+	awscdk.NewCfnOutput(stack, jsii.String("ScriptsBaseUrl"), &awscdk.CfnOutputProps{
+		Value: jsii.String(fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s/scripts", config.AssetBucketName, config.AwsRegion, strings.Trim(config.AssetKeyPrefix, "/"))),
 	})
 
 	return stack
@@ -82,7 +85,6 @@ func main() {
 	config, err := LoadConfig()
 	must(err)
 	must(prepareAssets(config))
-	must(NewTemplateGenerator(config).Write())
 
 	app := awscdk.NewApp(nil)
 	NewAssetPublisherStack(app, "GameServerAssetPublisher", &AssetPublisherStackProps{
@@ -106,7 +108,7 @@ func prepareAssets(config Config) error {
 		return err
 	}
 
-	if err := copyDir("../Bash", config.LocalBashBuildDir); err != nil {
+	if err := copyDir("../scripts", config.LocalScriptsBuildDir); err != nil {
 		return err
 	}
 

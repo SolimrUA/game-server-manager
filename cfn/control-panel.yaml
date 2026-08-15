@@ -8,6 +8,11 @@ Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
       - Label:
+          default: Published Assets (see CdkAssetPublisher in the root README)
+        Parameters:
+          - AssetsBucketName
+          - AssetsKeyPrefix
+      - Label:
           default: AWS Configuration
         Parameters:
           - HostedZoneId
@@ -18,6 +23,10 @@ Metadata:
         Parameters:
           - IdTagName
     ParameterLabels:
+      AssetsBucketName:
+        default: S3 bucket your Lambda code and web site files were published to by CdkAssetPublisher
+      AssetsKeyPrefix:
+        default: Key prefix under that bucket the assets were published to (matches CdkAssetPublisher's ASSET_KEY_PREFIX)
       FrontEndDomain:
         default: Optional custom domain for the web control site (same Hosted Zone as above)
       HostedZoneId:
@@ -28,6 +37,21 @@ Metadata:
         default: Tag value that will be used to identify your gaming server(s). Must match the value used on every Server stack.
 
 Parameters:
+  AssetsBucketName:
+    Description: >-
+      S3 bucket holding your published Lambda code and web site files (CdkAssetPublisher's ASSET_BUCKET_NAME
+      output). This stack never fetches from the public internet at deploy time - everything it needs must already
+      be in this bucket.
+    Type: String
+    AllowedPattern: .+
+    ConstraintDescription: Required - run CdkAssetPublisher first and pass its AssetBucketName output here.
+  AssetsKeyPrefix:
+    Description: >-
+      Key prefix under AssetsBucketName the assets were published to (CdkAssetPublisher's ASSET_KEY_PREFIX, no
+      leading or trailing slash, e.g. personal-game-server-manager/v1).
+    Type: String
+    AllowedPattern: .+
+    ConstraintDescription: Required - must match the ASSET_KEY_PREFIX used when running CdkAssetPublisher.
   FrontEndDomain:
     Description: Optional domain name for the web control site (e.g. game-servers.mydomain.link). Must be in the same Hosted Zone as configured below. Leave blank to only use the default CloudFront domain.
     Type: String
@@ -559,7 +583,6 @@ Resources:
                 Action:
                   - 's3:ListBucket'
                 Resource:
-                  - !GetAtt LambdaSourceFilesS3.Arn
                   - !GetAtt S3Bucket.Arn
                   - !GetAtt LoggingBucket.Arn
               - Effect: Allow
@@ -568,9 +591,6 @@ Resources:
                   - 's3:DeleteObject'
                   - 's3:GetObject'
                 Resource:
-                  - !Sub
-                    - ${bucket}/*
-                    - bucket: !GetAtt LambdaSourceFilesS3.Arn
                   - !Sub
                     - ${bucket}/*
                     - bucket: !GetAtt S3Bucket.Arn
@@ -756,7 +776,6 @@ Resources:
           import urllib.request
           from urllib.parse import urlparse
           import boto3
-          import zipfile
           import cfnresponse
           def lambda_handler(event, context):
               s3 = boto3.resource('s3')
@@ -771,16 +790,6 @@ Resources:
                     fileName = os.path.basename(urlPath)
                     filePath = '/tmp/' + fileName
                     urllib.request.urlretrieve(url, filePath)
-                    fileName = os.path.basename(filePath)
-                    if i.get('zip'):
-                      zipFileName = os.path.splitext(fileName)[0]+'.zip'
-                      zipFilePath = '/tmp/' + zipFileName
-                      arcName = i.get('filename')
-                      zf = zipfile.ZipFile(zipFilePath, mode ='w')
-                      zf.write(filePath, arcname=arcName)
-                      zf.close()
-                      fileName = zipFileName
-                      filePath = zipFilePath
                     contentType = i.get('content-type')
                     if i.get('folder'):
                       fileName = i.get('folder')+ '/' + fileName
@@ -922,11 +931,10 @@ Resources:
 
   StartStopLambda:
     Type: 'AWS::Lambda::Function'
-    DependsOn: CopyLambdaFiles
     Properties:
       Code:
-        S3Bucket: !Ref LambdaSourceFilesS3
-        S3Key: gaming_server_start_stop-v1_0.zip
+        S3Bucket: !Ref AssetsBucketName
+        S3Key: !Sub ${AssetsKeyPrefix}/Lambda/gaming_server_start_stop-v1_0.zip
       Description: Lambda function to control gaming server instances
       Environment:
         Variables:
@@ -945,11 +953,10 @@ Resources:
 
   UpdateDnsLambda:
     Type: 'AWS::Lambda::Function'
-    DependsOn: CopyLambdaFiles
     Properties:
       Code:
-        S3Bucket: !Ref LambdaSourceFilesS3
-        S3Key: update-dns-v1_0.zip
+        S3Bucket: !Ref AssetsBucketName
+        S3Key: !Sub ${AssetsKeyPrefix}/Lambda/update-dns-v1_0.zip
       Description: Lambda to update DNS
       Handler: lambda_function.lambda_handler
       MemorySize: 128
@@ -957,19 +964,6 @@ Resources:
       Role: !GetAtt UpdateDnsLambdaIamRole.Arn
       Runtime: python3.8
       Timeout: 10
-
-  LambdaSourceFilesS3:
-    Type: AWS::S3::Bucket
-    Properties:
-      AccessControl: Private
-      PublicAccessBlockConfiguration:
-          BlockPublicAcls: True
-          BlockPublicPolicy: True
-          IgnorePublicAcls: True
-          RestrictPublicBuckets: True
-      LoggingConfiguration:
-        DestinationBucketName: !Ref LoggingBucket
-        LogFilePrefix: s3-bucket-logs/
 
   S3Bucket:
     Type: AWS::S3::Bucket
@@ -1117,35 +1111,20 @@ Resources:
       ServiceToken: !GetAtt CopyToS3Lambda.Arn
       targetS3Bucket: !Ref S3Bucket
       sourceUrls:
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/styles.css
+        - url: !Sub https://${AssetsBucketName}.s3.${AWS::Region}.amazonaws.com/${AssetsKeyPrefix}/FrontEnd/styles.css
           content-type: text/css
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/index.html
+        - url: !Sub https://${AssetsBucketName}.s3.${AWS::Region}.amazonaws.com/${AssetsKeyPrefix}/FrontEnd/index.html
           content-type: text/html
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/signed_in.html
+        - url: !Sub https://${AssetsBucketName}.s3.${AWS::Region}.amazonaws.com/${AssetsKeyPrefix}/FrontEnd/signed_in.html
           content-type: text/html
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/logout.html
+        - url: !Sub https://${AssetsBucketName}.s3.${AWS::Region}.amazonaws.com/${AssetsKeyPrefix}/FrontEnd/logout.html
           content-type: text/html
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/js/config.js
+        - url: !Sub https://${AssetsBucketName}.s3.${AWS::Region}.amazonaws.com/${AssetsKeyPrefix}/FrontEnd/js/config.js
           content-type: application/javascript
           folder: js
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/FrontEnd/js/index.js
+        - url: !Sub https://${AssetsBucketName}.s3.${AWS::Region}.amazonaws.com/${AssetsKeyPrefix}/FrontEnd/js/index.js
           content-type: application/javascript
           folder: js
-
-  CopyLambdaFiles:
-    Type: Custom::WebFileCopy
-    Properties:
-      ServiceToken: !GetAtt CopyToS3Lambda.Arn
-      targetS3Bucket: !Ref LambdaSourceFilesS3
-      sourceUrls:
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Lambda/update-dns-v1_0.py
-          content-type: application/zip
-          zip: True
-          filename: lambda_function.py
-        - url: https://raw.githubusercontent.com/aws-samples/personal-game-server-manager/main/Lambda/gaming_server_start_stop-v1_0.py
-          content-type: application/zip
-          zip: True
-          filename: lambda_function.py
 
   UpdateConfig:
     Type: Custom::UpdateFileInS3

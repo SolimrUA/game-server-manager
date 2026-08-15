@@ -20,16 +20,10 @@ const localConfigFile = ".env"
 // ASSET_KEY_PREFIX=personal-game-server-manager/v1
 //
 // Optional path overrides, relative to CdkAssetPublisher/.
-// COMMON_SOURCE_TEMPLATE_PATH=../cfn/common-infra.yaml
-// COMMON_OUTPUT_TEMPLATE_PATH=../build/common-infra.assets.yaml
-// SERVER_SOURCE_TEMPLATE_PATH=../cfn/server-stack.yaml
-// SERVER_OUTPUT_TEMPLATE_PATH=../build/server-stack.assets.yaml
-// CONTROLPANEL_SOURCE_TEMPLATE_PATH=../cfn/control-panel.yaml
-// CONTROLPANEL_OUTPUT_TEMPLATE_PATH=../build/control-panel.assets.yaml
 // LOCAL_ASSET_BUILD_DIR=../build/assets
 // LOCAL_LAMBDA_BUILD_DIR=../build/assets/Lambda
 // LOCAL_FRONTEND_BUILD_DIR=../build/assets/FrontEnd
-// LOCAL_BASH_BUILD_DIR=../build/assets/Bash
+// LOCAL_SCRIPTS_BUILD_DIR=../build/assets/scripts
 
 type Config struct {
 	AwsAccount string
@@ -39,17 +33,10 @@ type Config struct {
 	CreateAssetBucket bool
 	AssetKeyPrefix    string
 
-	CommonSourceTemplatePath       string
-	CommonOutputTemplatePath       string
-	ServerSourceTemplatePath       string
-	ServerOutputTemplatePath       string
-	ControlPanelSourceTemplatePath string
-	ControlPanelOutputTemplatePath string
-
 	LocalAssetBuildDir    string
 	LocalLambdaBuildDir   string
 	LocalFrontendBuildDir string
-	LocalBashBuildDir     string
+	LocalScriptsBuildDir  string
 }
 
 func LoadConfig() (Config, error) {
@@ -64,19 +51,12 @@ func LoadConfig() (Config, error) {
 		CreateAssetBucket: boolEnv("CREATE_ASSET_BUCKET", true),
 		AssetKeyPrefix:    stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
 
-		CommonSourceTemplatePath:       stringEnv("COMMON_SOURCE_TEMPLATE_PATH", "../cfn/common-infra.yaml"),
-		CommonOutputTemplatePath:       stringEnv("COMMON_OUTPUT_TEMPLATE_PATH", "../build/common-infra.assets.yaml"),
-		ServerSourceTemplatePath:       stringEnv("SERVER_SOURCE_TEMPLATE_PATH", "../cfn/server-stack.yaml"),
-		ServerOutputTemplatePath:       stringEnv("SERVER_OUTPUT_TEMPLATE_PATH", "../build/server-stack.assets.yaml"),
-		ControlPanelSourceTemplatePath: stringEnv("CONTROLPANEL_SOURCE_TEMPLATE_PATH", "../cfn/control-panel.yaml"),
-		ControlPanelOutputTemplatePath: stringEnv("CONTROLPANEL_OUTPUT_TEMPLATE_PATH", "../build/control-panel.assets.yaml"),
-
 		LocalAssetBuildDir: stringEnv("LOCAL_ASSET_BUILD_DIR", "../build/assets"),
 	}
 
 	config.LocalLambdaBuildDir = stringEnv("LOCAL_LAMBDA_BUILD_DIR", config.LocalAssetBuildDir+"/Lambda")
 	config.LocalFrontendBuildDir = stringEnv("LOCAL_FRONTEND_BUILD_DIR", config.LocalAssetBuildDir+"/FrontEnd")
-	config.LocalBashBuildDir = stringEnv("LOCAL_BASH_BUILD_DIR", config.LocalAssetBuildDir+"/Bash")
+	config.LocalScriptsBuildDir = stringEnv("LOCAL_SCRIPTS_BUILD_DIR", config.LocalAssetBuildDir+"/scripts")
 
 	if err := validateConfig(config); err != nil {
 		return Config{}, err
@@ -125,13 +105,10 @@ func loadEnvFile(path string) error {
 
 func validateConfig(config Config) error {
 	for label, path := range map[string]string{
-		"COMMON_OUTPUT_TEMPLATE_PATH":       config.CommonOutputTemplatePath,
-		"SERVER_OUTPUT_TEMPLATE_PATH":       config.ServerOutputTemplatePath,
-		"CONTROLPANEL_OUTPUT_TEMPLATE_PATH": config.ControlPanelOutputTemplatePath,
-		"LOCAL_ASSET_BUILD_DIR":             config.LocalAssetBuildDir,
-		"LOCAL_LAMBDA_BUILD_DIR":            config.LocalLambdaBuildDir,
-		"LOCAL_FRONTEND_BUILD_DIR":          config.LocalFrontendBuildDir,
-		"LOCAL_BASH_BUILD_DIR":              config.LocalBashBuildDir,
+		"LOCAL_ASSET_BUILD_DIR":    config.LocalAssetBuildDir,
+		"LOCAL_LAMBDA_BUILD_DIR":   config.LocalLambdaBuildDir,
+		"LOCAL_FRONTEND_BUILD_DIR": config.LocalFrontendBuildDir,
+		"LOCAL_SCRIPTS_BUILD_DIR":  config.LocalScriptsBuildDir,
 	} {
 		if err := requireRepoBuildPath(label, path); err != nil {
 			return err

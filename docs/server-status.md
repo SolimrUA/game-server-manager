@@ -16,9 +16,11 @@ exactly that one key. Nothing else in the bucket is writable by the instance.
 ## Who writes it
 
 A per-game "status agent" process, installed by that game's cartridge script (e.g.
-[`Bash/vintagestory.sh`](../Bash/vintagestory.sh)), running alongside the actual game server. It re-checks state
-(player count via log tailing, mods via folder inspection, version from the pinned install version) on a short
-interval and only re-uploads the JSON when something actually changed, to keep S3 costs and API calls minimal.
+[`scripts/VintageStory/install.sh`](../scripts/VintageStory/install.sh), which fetches its companion
+[`status_agent.py`](../scripts/VintageStory/status_agent.py) from alongside itself and runs it as a systemd service),
+running alongside the actual game server. It re-checks state (player count via log tailing, mods via folder
+inspection, version from the pinned install version) on a short interval and only re-uploads the JSON when
+something actually changed, to keep S3 costs and API calls minimal.
 
 ## Who reads it
 
@@ -56,7 +58,11 @@ data rather than erroring.
 
 ## Adding status reporting for another game
 
-1. Have the cartridge script drop a status agent that writes this JSON shape to the path above on an interval,
-   pushing only on change.
-2. Nothing else needs to change - the S3 key convention, IAM policy, and Lambda/front-end read path are already
+1. Put the game's cartridge script in its own folder under `scripts/` (e.g. `scripts/VintageStory/`) alongside a status
+   agent script, following the same split used for Vintage Story. The server stack invokes the cartridge script as
+   `./install.sh "$GameServer"`, so `$1` is the script's own source URL - use it to fetch sibling files (like the
+   status agent) from wherever `install.sh` itself was served from. In practice this is always your S3-published
+   copy (see the root README) - `GameServer` has no default and CloudFormation never fetches from GitHub.
+2. Have that status agent write this JSON shape to the path above on an interval, pushing only on change.
+3. Nothing else needs to change - the S3 key convention, IAM policy, and Lambda/front-end read path are already
    game-agnostic.
