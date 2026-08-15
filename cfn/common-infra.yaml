@@ -59,6 +59,19 @@ Resources:
       RouteTableId: !Ref RouteTable
       SubnetId: !Ref Subnet
 
+  StatusBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
 Outputs:
   VpcId:
     Description: VPC ID - imported by every Server stack via Fn::ImportValue common-infra-vpc-id
@@ -71,3 +84,11 @@ Outputs:
     Value: !Ref Subnet
     Export:
       Name: common-infra-subnet-id
+
+  StatusBucketName:
+    Description: >-
+      S3 bucket holding each server's live status snapshot (player count, mods, version - see docs/server-status.md).
+      Every Server stack writes to it and the Control Panel reads from it, both via Fn::ImportValue common-infra-status-bucket-name.
+    Value: !Ref StatusBucket
+    Export:
+      Name: common-infra-status-bucket-name

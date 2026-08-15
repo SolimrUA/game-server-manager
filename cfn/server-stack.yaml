@@ -257,6 +257,8 @@ Resources:
           Value: !Ref Domain
         - Key: hostedZoneId
           Value: !Ref HostedZoneId
+        - Key: game-name
+          Value: !Ref GameName
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -277,6 +279,8 @@ Resources:
             python3 -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-py3-latest.tar.gz
             ln -s /root/aws-cfn-bootstrap-latest/init/ubuntu/cfn-hup /etc/init.d/cfn-hup
             echo ${AWS::StackName} > /tmp/paramName.txt
+            echo ${StatusBucket} > /tmp/statusBucket.txt
+            echo ${GameName} > /tmp/statusKey.txt
             mkdir -p /usr/games/install
             cd /usr/games/install
             wget -O gameserverinstall.sh ${GameServer}
@@ -285,6 +289,7 @@ Resources:
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
             shutdown -h now
           - GameServer: !Ref GameServer
+            StatusBucket: !ImportValue common-infra-status-bucket-name
 
   PwordParameter:
     Type: AWS::SSM::Parameter
@@ -325,6 +330,11 @@ Resources:
                 Resource: !Sub
                   - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${paramName}
                   - paramName: !Ref PwordParameter
+              - Effect: Allow
+                Action: "s3:PutObject"
+                Resource: !Sub
+                  - arn:aws:s3:::${bucket}/status/${GameName}.json
+                  - bucket: !ImportValue common-infra-status-bucket-name
 
   BackupIamRole:
     Type: 'AWS::IAM::Role'

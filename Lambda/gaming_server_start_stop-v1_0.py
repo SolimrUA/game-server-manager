@@ -13,12 +13,14 @@ def lambda_handler(event, context): #standard function called on lambda invocati
     tagValue = event['tagValue'] #This is the Tag for the resources we're looking to handle
     targetInstanceId = event.get('instanceId') #Optional - restricts start/stop/resize to a single instance instead of all tagged instances
     global ec2
-    instanceIds = [] 
+    global s3
+    instanceIds = []
     info = []
     serverResizeCheck = "OK"
     statemachineresponse = {}
-    
+
     ec2 = boto3.client('ec2') #Sets up ec2 as the object to call the boto3 (AWS Python SDK) client library for the EC2 service
+    s3 = boto3.client('s3')
     info = getInfo(tagKey, tagValue)
     
     if len(info['Instances']) < 1:
@@ -110,9 +112,23 @@ def getInfo(tagKey, tagValue):
                     else:
                         infoDict["hostedZoneId"] = 'No hosted zone tag found'
                 infoDict['PublicIpAddress'] = instance.get('PublicIpAddress','No public IP address')
+                gameName = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'game-name'), None)
+                infoDict['GameStatus'] = getGameStatus(gameName) if infoDict['State'] == 'running' else None
                 info["Instances"].append(infoDict)
     return(info)
-    
+
+def getGameStatus(gameName):
+    #Reads the per-server status snapshot (players/version/mods) that game's status agent pushes to S3 - see docs/server-status.md
+    statusBucket = os.environ.get('statusBucket')
+    if not statusBucket or not gameName:
+        return None
+    try:
+        obj = s3.get_object(Bucket=statusBucket, Key='status/'+gameName+'.json')
+        return json.loads(obj['Body'].read())
+    except Exception as e:
+        print("No game status available for "+str(gameName)+": "+str(e))
+        return None
+
 def updateDnsStateFunc(info):
     stepfunction = boto3.client('stepfunctions')
     consolidatedsmresponse = []

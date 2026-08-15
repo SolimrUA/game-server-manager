@@ -27,6 +27,25 @@ function mcStateBadgeClass(state) {
   return 'pending';
 }
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// mods: array of {name, version} from GameStatus - see docs/server-status.md
+function renderModsList(mods) {
+  if (!mods || mods.length === 0) {
+    return '<p class="mcModsEmpty">No mod info available yet.</p>';
+  }
+  return '<ul class="mcModsList">' + mods.map(function (mod) {
+    var version = mod.version ? ' <span class="mcModVersion">v' + escapeHtml(mod.version) + '</span>' : '';
+    return '<li>' + escapeHtml(mod.name) + version + '</li>';
+  }).join('') + '</ul>';
+}
+
 // Renders one row per instance, preserving which row (if any) is currently expanded
 async function renderTable(data) {
     var instances = (data && data[1] && data[1]["Instances"]) || [];
@@ -34,7 +53,7 @@ async function renderTable(data) {
     var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
 
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="5">No gaming server instances found</td></tr>';
+      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="7">No gaming server instances found</td></tr>';
       return;
     }
 
@@ -47,18 +66,25 @@ async function renderTable(data) {
 
       var badgeClass = mcStateBadgeClass(instance['State']);
       var dns = instance['DomainName'] && instance['DomainName'] !== 'No domain tag found' ? instance['DomainName'] : '—';
+      var status = instance['GameStatus'];
+      var playersText = status && status.players && status.players.current != null
+        ? status.players.current + (status.players.max != null ? ' / ' + status.players.max : '')
+        : '—';
+      var versionText = status && status.version ? escapeHtml(status.version) : '—';
 
       row.innerHTML =
         '<td><span class="mcChevron">▸</span></td>' +
         '<td><span class="mcDnsDot" data-dns-dot></span>' + dns + '</td>' +
         '<td>' + (instance['PublicIpAddress'] || '—') + '</td>' +
         '<td><span class="mcBadge ' + badgeClass + '">' + instance['State'] + '</span></td>' +
-        '<td>' + instance['InstanceType'] + '</td>';
+        '<td>' + instance['InstanceType'] + '</td>' +
+        '<td>' + playersText + '</td>' +
+        '<td>' + versionText + '</td>';
 
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
-        '<td colspan="5"><div class="mcDetailInner">' +
+        '<td colspan="7"><div class="mcDetailInner">' +
         '<button class="btn stop">Stop</button>' +
         '<button class="btn start">Start</button>' +
         '<select class="mcResizeSelect">' +
@@ -68,7 +94,9 @@ async function renderTable(data) {
         '<option value="large">Large</option>' +
         '</select>' +
         '<button class="btn primary">Resize</button>' +
-        '</div></td>';
+        '</div>' +
+        '<div class="mcModsSection"><h4>Mods</h4>' + renderModsList(status && status.mods) + '</div>' +
+        '</td>';
 
       var instanceId = instance['InstanceId'];
       var select = detailRow.querySelector('select');

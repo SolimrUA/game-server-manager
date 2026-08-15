@@ -287,6 +287,46 @@ tr.mcServerDetail td {
     gap: 10px;
 }
 
+.mcModsSection {
+    padding: 0 20px 16px;
+}
+
+.mcModsSection h4 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--grey-3);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.mcModsList {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.mcModsList li {
+    background: var(--white);
+    border: 1px solid var(--grey-2);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 12px;
+}
+
+.mcModVersion {
+    color: var(--grey-3);
+}
+
+.mcModsEmpty {
+    margin: 0;
+    font-size: 12px;
+    color: var(--grey-3);
+}
+
 .hidden { display: none; }
 
 .mcLoadingRow td {

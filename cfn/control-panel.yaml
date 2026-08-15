@@ -735,11 +735,17 @@ Resources:
                             "ec2:ResourceTag/${tagname}": "${tagvalue}"
                           }
                         }
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "s3:GetObject",
+                        "Resource": "arn:aws:s3:::${statusBucketName}/status/*"
                       }
                     ]
                   }
               - tagname: !Ref IdTagName
                 tagvalue: !Ref IdTagValue
+                statusBucketName: !ImportValue common-infra-status-bucket-name
 
   CopyToS3Lambda:
     Type: 'AWS::Lambda::Function'
@@ -929,6 +935,7 @@ Resources:
           medium: t3a.medium
           large: t3a.large
           stepfunctionarn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-state-machine'
+          statusBucket: !ImportValue common-infra-status-bucket-name
       Handler: lambda_function.lambda_handler
       MemorySize: 128
       PackageType: Zip
