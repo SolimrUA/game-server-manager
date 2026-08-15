@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/fs"
@@ -20,15 +22,25 @@ import (
 
 type AssetPublisherStackProps struct {
 	awscdk.StackProps
-	Config Config
+	Config     Config
+	LambdaKeys LambdaKeys
+}
+
+// LambdaKeys holds the content-addressed S3 keys (relative to AssetKeyPrefix) that each Lambda zip was
+// published under - see zipLambdaContentAddressed for why these need to change whenever the code does.
+type LambdaKeys struct {
+	StartStopLambdaKey string
+	UpdateDnsLambdaKey string
 }
 
 func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetPublisherStackProps) awscdk.Stack {
 	var stackProps awscdk.StackProps
 	var config Config
+	var lambdaKeys LambdaKeys
 	if props != nil {
 		stackProps = props.StackProps
 		config = props.Config
+		lambdaKeys = props.LambdaKeys
 	}
 
 	stack := awscdk.NewStack(scope, &id, &stackProps)
@@ -66,8 +78,9 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	})
 
 	// These are the values to pass as --parameter-overrides to `aws cloudformation deploy` for
-	// cfn/control-panel.yaml (AssetsBucketName/AssetsKeyPrefix) and cfn/server-stack.yaml (GameServer,
-	// composed as ScriptsBaseUrl + "/<script>", e.g. ScriptsBaseUrl + "/valheim.sh"). See the root README.
+	// cfn/control-panel.yaml (AssetsBucketName/AssetsKeyPrefix/StartStopLambdaKey/UpdateDnsLambdaKey) and
+	// cfn/server-stack.yaml (GameServer, composed as ScriptsBaseUrl + "/<script>", e.g.
+	// ScriptsBaseUrl + "/valheim.sh"). See the root README.
 	awscdk.NewCfnOutput(stack, jsii.String("AssetBucketName"), &awscdk.CfnOutputProps{
 		Value: jsii.String(config.AssetBucketName),
 	})
@@ -77,6 +90,12 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	awscdk.NewCfnOutput(stack, jsii.String("ScriptsBaseUrl"), &awscdk.CfnOutputProps{
 		Value: jsii.String(fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s/scripts", config.AssetBucketName, config.AwsRegion, strings.Trim(config.AssetKeyPrefix, "/"))),
 	})
+	awscdk.NewCfnOutput(stack, jsii.String("StartStopLambdaKey"), &awscdk.CfnOutputProps{
+		Value: jsii.String(lambdaKeys.StartStopLambdaKey),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("UpdateDnsLambdaKey"), &awscdk.CfnOutputProps{
+		Value: jsii.String(lambdaKeys.UpdateDnsLambdaKey),
+	})
 
 	return stack
 }
@@ -84,14 +103,16 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 func main() {
 	config, err := LoadConfig()
 	must(err)
-	must(prepareAssets(config))
+	lambdaKeys, err := prepareAssets(config)
+	must(err)
 
 	app := awscdk.NewApp(nil)
 	NewAssetPublisherStack(app, "GameServerAssetPublisher", &AssetPublisherStackProps{
 		StackProps: awscdk.StackProps{
 			Env: env(config),
 		},
-		Config: config,
+		Config:     config,
+		LambdaKeys: lambdaKeys,
 	})
 	app.Synth(nil)
 }
@@ -103,31 +124,29 @@ func env(config Config) *awscdk.Environment {
 	}
 }
 
-func prepareAssets(config Config) error {
+func prepareAssets(config Config) (LambdaKeys, error) {
 	if err := os.RemoveAll(config.LocalAssetBuildDir); err != nil {
-		return err
+		return LambdaKeys{}, err
 	}
 
 	if err := copyDir("../scripts", config.LocalScriptsBuildDir); err != nil {
-		return err
+		return LambdaKeys{}, err
 	}
 
 	if err := copyDir("../FrontEnd", config.LocalFrontendBuildDir); err != nil {
-		return err
+		return LambdaKeys{}, err
 	}
 
-	lambdas := map[string]string{
-		"../Lambda/gaming_server_start_stop-v1_0.py": filepath.Join(config.LocalLambdaBuildDir, "gaming_server_start_stop-v1_0.zip"),
-		"../Lambda/update-dns-v1_0.py":               filepath.Join(config.LocalLambdaBuildDir, "update-dns-v1_0.zip"),
+	startStopKey, err := zipLambdaContentAddressed(config, "../Lambda/gaming_server_start_stop-v1_0.py", "gaming_server_start_stop-v1_0")
+	if err != nil {
+		return LambdaKeys{}, err
+	}
+	updateDnsKey, err := zipLambdaContentAddressed(config, "../Lambda/update-dns-v1_0.py", "update-dns-v1_0")
+	if err != nil {
+		return LambdaKeys{}, err
 	}
 
-	for source, destination := range lambdas {
-		if err := zipLambda(source, destination); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return LambdaKeys{StartStopLambdaKey: startStopKey, UpdateDnsLambdaKey: updateDnsKey}, nil
 }
 
 func copyDir(source, destination string) error {
@@ -179,33 +198,46 @@ func copyFile(source, destination string) error {
 	return err
 }
 
-func zipLambda(source, destination string) error {
-	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
-		return err
-	}
-
-	output, err := os.Create(destination)
-	if err != nil {
-		return err
-	}
-	defer output.Close()
-
-	archive := zip.NewWriter(output)
-	defer archive.Close()
+// zipLambdaContentAddressed zips source into config.LocalLambdaBuildDir under a name that includes a hash
+// of its content, and returns the resulting key relative to AssetKeyPrefix (e.g. "Lambda/foo.deadbeef.zip").
+//
+// This matters because AWS::Lambda::Function only re-fetches code from S3 when the Code.S3Key VALUE itself
+// changes in the CloudFormation template - it has no way to know the object AT an unchanged key was
+// overwritten with different bytes, so a fixed filename would let code fixes silently fail to deploy.
+func zipLambdaContentAddressed(config Config, source, baseName string) (string, error) {
+	var buf bytes.Buffer
+	archive := zip.NewWriter(&buf)
 
 	writer, err := archive.Create("lambda_function.py")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	input, err := os.Open(source)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer input.Close()
 
-	_, err = io.Copy(writer, input)
-	return err
+	if _, err := io.Copy(writer, input); err != nil {
+		return "", err
+	}
+	if err := archive.Close(); err != nil {
+		return "", err
+	}
+
+	hash := sha256.Sum256(buf.Bytes())
+	fileName := fmt.Sprintf("%s.%x.zip", baseName, hash[:6])
+	destination := filepath.Join(config.LocalLambdaBuildDir, fileName)
+
+	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(destination, buf.Bytes(), 0644); err != nil {
+		return "", err
+	}
+
+	return "Lambda/" + fileName, nil
 }
 
 func must(err error) {

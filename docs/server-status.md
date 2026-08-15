@@ -35,6 +35,7 @@ to S3 directly.
 {
   "gameName": "vintagestory",
   "version": "1.22.6",
+  "serviceStatus": "active",
   "players": {
     "current": 2,
     "max": 16
@@ -47,6 +48,12 @@ to S3 directly.
 }
 ```
 
+- `serviceStatus` - the game process's own systemd unit state (`systemctl is-active <unit>`): `active`, `activating`,
+  `inactive`, `deactivating`, `failed`, or `unknown`. This is deliberately separate from the EC2 instance's own
+  running/stopped state (which the front-end already gets straight from `ec2:DescribeInstances`, not from this
+  file) - an instance can be `running` while the game process is still starting up, crash-looping (`failed`), or
+  hasn't been installed yet. The front-end shows both: EC2 power state in the existing State column, and this as a
+  separate Game column, so "server started but the game didn't come up" is visibly distinct from "not started yet".
 - `players.current` / `players.max` - integers. `max` may be `null` if the agent couldn't determine it.
 - `mods` - array of `{name, version}`. `version` is `null` when it couldn't be determined (e.g. a mod without a
   parseable manifest). Empty array if the game has no mod support or none are installed.
@@ -63,6 +70,8 @@ data rather than erroring.
    `./install.sh "$GameServer"`, so `$1` is the script's own source URL - use it to fetch sibling files (like the
    status agent) from wherever `install.sh` itself was served from. In practice this is always your S3-published
    copy (see the root README) - `GameServer` has no default and CloudFormation never fetches from GitHub.
-2. Have that status agent write this JSON shape to the path above on an interval, pushing only on change.
+2. Have that status agent write this JSON shape to the path above on an interval, pushing only on change - including
+   `serviceStatus` from whatever process supervisor runs the game (e.g. `systemctl is-active <unit>` for a systemd
+   service), so the front-end can distinguish "EC2 running, game not up yet" from "both running".
 3. Nothing else needs to change - the S3 key convention, IAM policy, and Lambda/front-end read path are already
    game-agnostic.

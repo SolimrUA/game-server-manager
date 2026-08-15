@@ -27,6 +27,19 @@ function mcStateBadgeClass(state) {
   return 'pending';
 }
 
+// The EC2 instance can be running before/without the game process itself being up (still installing,
+// crash-looping, etc) - this is deliberately a separate badge from the EC2 State one. See docs/server-status.md.
+function mcGameStatus(instance) {
+  if (instance['State'] !== 'running') {
+    return { text: '—', badgeClass: null };
+  }
+  var serviceStatus = instance['GameStatus'] && instance['GameStatus'].serviceStatus;
+  if (serviceStatus === 'active') return { text: 'Running', badgeClass: 'running' };
+  if (serviceStatus === 'failed') return { text: 'Crashed', badgeClass: 'error' };
+  if (serviceStatus === 'inactive') return { text: 'Stopped', badgeClass: 'stopped' };
+  return { text: 'Starting…', badgeClass: 'pending' };
+}
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -53,7 +66,7 @@ async function renderTable(data) {
     var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
 
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="7">No gaming server instances found</td></tr>';
+      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
       return;
     }
 
@@ -67,6 +80,7 @@ async function renderTable(data) {
       var badgeClass = mcStateBadgeClass(instance['State']);
       var dns = instance['DomainName'] && instance['DomainName'] !== 'No domain tag found' ? instance['DomainName'] : '—';
       var status = instance['GameStatus'];
+      var gameStatus = mcGameStatus(instance);
       var playersText = status && status.players && status.players.current != null
         ? status.players.current + (status.players.max != null ? ' / ' + status.players.max : '')
         : '—';
@@ -77,6 +91,7 @@ async function renderTable(data) {
         '<td><span class="mcDnsDot" data-dns-dot></span>' + dns + '</td>' +
         '<td>' + (instance['PublicIpAddress'] || '—') + '</td>' +
         '<td><span class="mcBadge ' + badgeClass + '">' + instance['State'] + '</span></td>' +
+        '<td>' + (gameStatus.badgeClass ? '<span class="mcBadge ' + gameStatus.badgeClass + '">' + gameStatus.text + '</span>' : gameStatus.text) + '</td>' +
         '<td>' + instance['InstanceType'] + '</td>' +
         '<td>' + playersText + '</td>' +
         '<td>' + versionText + '</td>';
@@ -84,7 +99,7 @@ async function renderTable(data) {
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
-        '<td colspan="7"><div class="mcDetailInner">' +
+        '<td colspan="8"><div class="mcDetailInner">' +
         '<button class="btn stop">Stop</button>' +
         '<button class="btn start">Start</button>' +
         '<select class="mcResizeSelect">' +

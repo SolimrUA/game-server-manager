@@ -61,14 +61,15 @@ cdk bootstrap aws://ACCOUNT/REGION
 cdk deploy
 ```
 
-This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints three outputs you'll need for the next two steps:
+This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints the outputs you'll need for the next two steps:
 
 - `AssetBucketName` / `AssetKeyPrefix` - pass straight through as the Control Panel's `AssetsBucketName`/`AssetsKeyPrefix` parameters below.
 - `ScriptsBaseUrl` - the base URL for published game install scripts. A given game's `GameServer` parameter is this plus its script's path, e.g. `<ScriptsBaseUrl>/valheim.sh` or `<ScriptsBaseUrl>/VintageStory/install.sh`.
+- `StartStopLambdaKey` / `UpdateDnsLambdaKey` - content-hashed S3 keys for the two Lambda zips, e.g. `Lambda/gaming_server_start_stop-v1_0.<hash>.zip`. Pass these as the Control Panel's parameters of the same name. They're hashed (not fixed filenames) so that changing the Lambda code always produces a different value here - CloudFormation only redeploys `AWS::Lambda::Function` code when this value itself changes, not when the object at an unchanged key does, so a fixed name would let code fixes silently fail to deploy.
 
-Re-run `cdk deploy` here any time you change a script, the Lambda code, or the front-end files - it's the only step that needs re-running for content changes; the stacks below just reference this bucket by name/prefix and don't need redeploying unless their own parameters change.
+Re-run `cdk deploy` here any time you change a script, Lambda code, or the front-end files. The front-end/game-script changes take effect on the next Control Panel/Server deploy automatically (same bucket/prefix); Lambda code changes need the Control Panel re-deployed with the new `StartStopLambdaKey`/`UpdateDnsLambdaKey` values from this step's output.
 
-### 3. Control Panel - once
+### 3. Control Panel - once, and again whenever the Lambda code changes
 
 ```bash
 aws cloudformation deploy \
@@ -78,6 +79,8 @@ aws cloudformation deploy \
   --parameter-overrides \
       AssetsBucketName=<AssetBucketName FROM STEP 2> \
       AssetsKeyPrefix=<AssetKeyPrefix FROM STEP 2> \
+      StartStopLambdaKey=<StartStopLambdaKey FROM STEP 2> \
+      UpdateDnsLambdaKey=<UpdateDnsLambdaKey FROM STEP 2> \
       HostedZoneId=<YOUR_HOSTED_ZONE_ID> \
       FrontEndDomain=<OPTIONAL_CONTROL_SITE_DOMAIN>
 ```

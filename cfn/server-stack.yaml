@@ -243,6 +243,10 @@ Conditions:
 Resources:
   EC2Instance:
     Type: 'AWS::EC2::Instance'
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT30M
     Properties:
       SecurityGroupIds:
         - !Ref SecurityGroup
@@ -282,6 +286,7 @@ Resources:
             wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
             python3 -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-py3-latest.tar.gz
             ln -s /root/aws-cfn-bootstrap-latest/init/ubuntu/cfn-hup /etc/init.d/cfn-hup
+            trap '/opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}; shutdown -h +2' EXIT
             echo ${AWS::StackName} > /tmp/paramName.txt
             echo ${StatusBucket} > /tmp/statusBucket.txt
             echo ${GameName} > /tmp/statusKey.txt
@@ -290,8 +295,6 @@ Resources:
             wget -O gameserverinstall.sh ${GameServer}
             chmod +x gameserverinstall.sh
             ./gameserverinstall.sh "${GameServer}"
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
-            shutdown -h now
           - GameServer: !Ref GameServer
             StatusBucket: !ImportValue common-infra-status-bucket-name
 

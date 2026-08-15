@@ -12,6 +12,8 @@ Metadata:
         Parameters:
           - AssetsBucketName
           - AssetsKeyPrefix
+          - StartStopLambdaKey
+          - UpdateDnsLambdaKey
       - Label:
           default: AWS Configuration
         Parameters:
@@ -27,6 +29,10 @@ Metadata:
         default: S3 bucket your Lambda code and web site files were published to by CdkAssetPublisher
       AssetsKeyPrefix:
         default: Key prefix under that bucket the assets were published to (matches CdkAssetPublisher's ASSET_KEY_PREFIX)
+      StartStopLambdaKey:
+        default: CdkAssetPublisher's StartStopLambdaKey output - a content-hashed key that changes whenever this Lambda's code does, so this stack actually redeploys it
+      UpdateDnsLambdaKey:
+        default: CdkAssetPublisher's UpdateDnsLambdaKey output - same idea, for the DNS-update Lambda
       FrontEndDomain:
         default: Optional custom domain for the web control site (same Hosted Zone as above)
       HostedZoneId:
@@ -52,6 +58,19 @@ Parameters:
     Type: String
     AllowedPattern: .+
     ConstraintDescription: Required - must match the ASSET_KEY_PREFIX used when running CdkAssetPublisher.
+  StartStopLambdaKey:
+    Description: >-
+      CdkAssetPublisher's StartStopLambdaKey output (e.g. Lambda/gaming_server_start_stop-v1_0.abc123.zip).
+      Content-hashed so that a code change always produces a new value here, which is what actually makes this
+      stack redeploy the Lambda - CloudFormation ignores S3 object content changes at an unchanged key/value.
+    Type: String
+    AllowedPattern: .+
+    ConstraintDescription: Required - run CdkAssetPublisher first and pass its StartStopLambdaKey output here.
+  UpdateDnsLambdaKey:
+    Description: CdkAssetPublisher's UpdateDnsLambdaKey output - same content-hashing reasoning as StartStopLambdaKey.
+    Type: String
+    AllowedPattern: .+
+    ConstraintDescription: Required - run CdkAssetPublisher first and pass its UpdateDnsLambdaKey output here.
   FrontEndDomain:
     Description: Optional domain name for the web control site (e.g. game-servers.mydomain.link). Must be in the same Hosted Zone as configured below. Leave blank to only use the default CloudFront domain.
     Type: String
@@ -782,7 +801,7 @@ Resources:
               properties = event['ResourceProperties']
               urls = properties['sourceUrls']
               bucket = properties['targetS3Bucket']
-              if event['RequestType'] == 'Create':
+              if event['RequestType'] in ('Create', 'Update'):
                 try:
                   for i in urls:
                     url = i.get('url')
@@ -934,7 +953,7 @@ Resources:
     Properties:
       Code:
         S3Bucket: !Ref AssetsBucketName
-        S3Key: !Sub ${AssetsKeyPrefix}/Lambda/gaming_server_start_stop-v1_0.zip
+        S3Key: !Sub ${AssetsKeyPrefix}/${StartStopLambdaKey}
       Description: Lambda function to control gaming server instances
       Environment:
         Variables:
@@ -956,7 +975,7 @@ Resources:
     Properties:
       Code:
         S3Bucket: !Ref AssetsBucketName
-        S3Key: !Sub ${AssetsKeyPrefix}/Lambda/update-dns-v1_0.zip
+        S3Key: !Sub ${AssetsKeyPrefix}/${UpdateDnsLambdaKey}
       Description: Lambda to update DNS
       Handler: lambda_function.lambda_handler
       MemorySize: 128

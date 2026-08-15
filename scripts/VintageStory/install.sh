@@ -1,5 +1,12 @@
+#!/bin/bash
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
+
+#fail loudly on any error - the outer UserData wrapper's cfn-signal only reports install failure
+#correctly if this script actually exits nonzero, which it won't do by default (no shebang meant this
+#previously ran without -e at all, so e.g. a failed apt install for the wrong .NET version silently
+#continued into "success").
+set -euo pipefail
 
 #the server stack's UserData invokes this as `./install.sh "$GameServer"` so we know our own source URL and
 #can fetch sibling files (status_agent.py) from the same location, whether that's raw.githubusercontent.com
@@ -15,11 +22,14 @@ sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv
 sudo unzip -o awscliv2.zip
 sudo ./aws/install
 
-#install the .NET 8.0 runtime required by the Vintage Story dedicated server
-wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
-sudo dpkg -i /tmp/packages-microsoft-prod.deb
-sudo apt update
-sudo apt install -y dotnet-runtime-8.0
+#install the .NET runtime required by the Vintage Story dedicated server, via Microsoft's official installer
+#rather than the apt feed - Ubuntu 20.04 has no dotnet-runtime-10.0 apt package (Microsoft drops apt support
+#for older distros faster than .NET major versions ship), so relying on apt here silently installed nothing
+#and the game server refused to start. Must match whatever VSVERSION below actually requires (check with
+#`./VintagestoryServer` if a newer VSVERSION starts refusing to launch).
+curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+chmod +x /tmp/dotnet-install.sh
+sudo /tmp/dotnet-install.sh --runtime dotnet --channel 10.0 --install-dir /usr/share/dotnet
 
 #create random string for join password
 VSPW=$(echo $RANDOM | md5sum | head -c 20)
@@ -34,7 +44,7 @@ aws ssm put-parameter --name $PARAMNAME --value $VSPW --type "SecureString" --ov
 #pinned server version - check https://account.vintagestory.at/downloads for newer stable releases
 VSVERSION=1.22.6
 VSPORT=42420
-VSNAME="MyAWSGamingServer"
+VSNAME=" "
 
 #create a dedicated, unprivileged user to run the server under
 id -u vintagestory &>/dev/null || sudo useradd vintagestory -m
@@ -57,7 +67,7 @@ sudo -u vintagestory jq \
   --argjson port $VSPORT \
   --arg name "$VSNAME" \
   --arg pw "$VSPW" \
-  '.Port=$port | .ServerName=$name | .Password=$pw | .Upnp=false | .AdvertiseServer=true' \
+  '.Port=$port | .ServerName=$name | .Password=$pw | .Upnp=false' \
   $CONFIGFILE | sudo -u vintagestory tee /tmp/serverconfig.json.tmp > /dev/null
 sudo -u vintagestory mv /tmp/serverconfig.json.tmp $CONFIGFILE
 

@@ -55,5 +55,5 @@ services:
       - ./valheim/saves:/home/steam/.config/unity3d/IronGate/Valheim
       - ./valheim/server:/home/steam/valheim
       - ./valheim/backups:/home/steam/backups" >> docker-compose.yml'
-echo "@reboot root (cd /usr/games/serverconfig/ && docker-compose up)" > /etc/cron.d/awsgameserver
-sudo docker-compose up
+echo "@reboot root (cd /usr/games/serverconfig/ && docker-compose up -d)" > /etc/cron.d/awsgameserver
+sudo docker-compose up -d

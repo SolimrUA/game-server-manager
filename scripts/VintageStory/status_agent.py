@@ -30,6 +30,15 @@ JOIN_RE = re.compile(r"Player (.+?) joined", re.IGNORECASE)
 LEAVE_RE = re.compile(r"Player (.+?) left", re.IGNORECASE)
 
 
+def read_service_status():
+    #one of: active, activating, inactive, deactivating, failed, unknown - see systemd.exec(5)/systemctl(1)
+    try:
+        result = subprocess.run(["systemctl", "is-active", "vintagestory"], capture_output=True, text=True)
+        return result.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
 def read_max_players():
     try:
         with open(CONFIG_PATH) as f:
@@ -116,6 +125,7 @@ def main():
         status = {
             "gameName": "vintagestory",
             "version": version,
+            "serviceStatus": read_service_status(),
             "players": {"current": len(online_players), "max": read_max_players()},
             "mods": read_mods(),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
