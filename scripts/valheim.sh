@@ -1,9 +1,22 @@
+#!/bin/bash
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
+set -euo pipefail
 
-sudo apt update && sudo apt upgrade -y 
+#stops apt from popping an interactive dialog (e.g. a pending-kernel-upgrade notice) that would otherwise
+#hang forever waiting for a terminal that isn't there. Not using sudo here since sudo resets the
+#environment by default and would drop this - this whole script already runs as root anyway.
+export DEBIAN_FRONTEND=noninteractive
+
+apt update && apt upgrade -y
 sudo apt install unzip apt-transport-https ca-certificates curl gnupg lsb-release -y
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg -y
+
+#Docker's own apt repo, so docker-ce actually resolves instead of falling back to Ubuntu's bundled docker.io
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
 
 #install AWS CLI
@@ -11,20 +24,21 @@ sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv
 sudo unzip awscliv2.zip
 sudo ./aws/install
 
-#create random string for password
-VHPW=$(echo $RANDOM | md5sum | head -c 20)
-
 #get stackname created by user data script and update SSM parameter name with this to make it unique
 STACKNAME=$(</tmp/paramName.txt)
 PARAMNAME=game-password-$STACKNAME
 
-#put random string into parameter store as encrypted string value
-aws ssm put-parameter --name $PARAMNAME --value $VHPW --type "SecureString" --overwrite
-
+#reuse the join password across reinstalls of this same stack instead of minting a new one every time;
+#only generate and store one the first time this server is ever set up
+if VHPW=$(aws ssm get-parameter --name "$PARAMNAME" --with-decryption --query Parameter.Value --output text 2>/dev/null); then
+  echo "Reusing existing join password from $PARAMNAME"
+else
+  VHPW=$(echo $RANDOM | md5sum | head -c 20)
+  aws ssm put-parameter --name "$PARAMNAME" --value "$VHPW" --type "SecureString" --overwrite
+fi
 
 #install docker and valheim app on docker
-sudo apt install docker-ce docker-ce-cli containerd.io -y
-sudo apt install docker-compose -y
+sudo apt install docker-ce docker-ce-cli containerd.io docker-compose-plugin -y
 sudo usermod -aG docker $USER
 sudo mkdir /usr/games/serverconfig
 cd /usr/games/serverconfig
@@ -55,5 +69,5 @@ services:
       - ./valheim/saves:/home/steam/.config/unity3d/IronGate/Valheim
       - ./valheim/server:/home/steam/valheim
       - ./valheim/backups:/home/steam/backups" >> docker-compose.yml'
-echo "@reboot root (cd /usr/games/serverconfig/ && docker-compose up -d)" > /etc/cron.d/awsgameserver
-sudo docker-compose up -d
+echo "@reboot root (cd /usr/games/serverconfig/ && docker compose up -d)" > /etc/cron.d/awsgameserver
+sudo docker compose up -d

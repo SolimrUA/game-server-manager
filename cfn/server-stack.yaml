@@ -130,7 +130,7 @@ Parameters:
   LatestAMIIDx86:
     Description: Defaults to the latest Ubuntu AMI ID.  You can replace this if you would like to use a different AMI / Operating System.
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
   GamingTCPTrafficPortStart:
     Description: Enter port number for your server ingress security group.  This will open your gaming server to TCP traffic to a range of ports with this as the lower boundary.
     Type: String
@@ -279,14 +279,12 @@ Resources:
         Fn::Base64: !Sub
           - |
             #!/bin/bash -xe
+            export DEBIAN_FRONTEND=noninteractive
             apt update
             apt upgrade -y
-            apt install -y python-setuptools
-            mkdir -p /opt/aws/bin
-            wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
-            python3 -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-py3-latest.tar.gz
-            ln -s /root/aws-cfn-bootstrap-latest/init/ubuntu/cfn-hup /etc/init.d/cfn-hup
-            trap '/opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}; shutdown -h +2' EXIT
+            apt install -y python3-pip
+            pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+            trap 'cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}; shutdown -h +2' EXIT
             echo ${AWS::StackName} > /tmp/paramName.txt
             echo ${StatusBucket} > /tmp/statusBucket.txt
             echo ${GameName} > /tmp/statusKey.txt
@@ -297,16 +295,6 @@ Resources:
             ./gameserverinstall.sh "${GameServer}"
           - GameServer: !Ref GameServer
             StatusBucket: !ImportValue common-infra-status-bucket-name
-
-  PwordParameter:
-    Type: AWS::SSM::Parameter
-    Properties:
-      DataType: text
-      Description: Parameter to store temp password randomly generated on initial stack creation
-      Name: !Sub game-password-${AWS::StackName}
-      Tier: Standard
-      Type: String
-      Value: tempValue
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -325,7 +313,7 @@ Resources:
             Principal:
               Service: ec2.amazonaws.com
             Action: 'sts:AssumeRole'
-      Description: IAM role to allow gaming EC2 server to update parameter with generated app password
+      Description: IAM role to allow gaming EC2 server to read/write its own join-password parameter
       Path: /service-role/
       Policies:
         - PolicyName: personal-gaming-server-role
@@ -333,10 +321,10 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: "ssm:PutParameter"
-                Resource: !Sub
-                  - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${paramName}
-                  - paramName: !Ref PwordParameter
+                Action:
+                  - "ssm:GetParameter"
+                  - "ssm:PutParameter"
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/game-password-${AWS::StackName}
               - Effect: Allow
                 Action: "s3:PutObject"
                 Resource: !Sub

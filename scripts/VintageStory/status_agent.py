@@ -3,9 +3,7 @@
 # SPDX-License-Identifier: MIT-0
 
 # Reports player count/max, version and mods to S3 every 5s, only pushing when something changed.
-# See docs/server-status.md for the schema and why this exists. Log line patterns below are Vintage Story's
-# best-known join/leave format - if player counts don't track correctly against your server-main.log, this is
-# the regex to adjust.
+# See docs/server-status.md for the schema and why this exists.
 import hashlib
 import json
 import os
@@ -17,26 +15,47 @@ import zipfile
 DATA_PATH = "/home/vintagestory/data"
 MODS_PATH = os.path.join(DATA_PATH, "Mods")
 CONFIG_PATH = os.path.join(DATA_PATH, "serverconfig.json")
-LOG_PATH = os.path.join(DATA_PATH, "Logs", "server-main.log")
 VERSION_FILE = "/home/vintagestory/version.txt"
 STATE_FILE = "/home/vintagestory/.status_last_hash"
 STATUS_TMP_FILE = "/tmp/status_push.json"
+SERVER_SH = "/home/vintagestory/server/server.sh"
+#server.sh identifies its own process this way (see PGREPTEST in server.sh) - matching it here means our
+#liveness check agrees with the game's own tooling rather than guessing independently
+PGREP_PATTERN = "dotnet VintagestoryServer.dll --dataPath {}".format(DATA_PATH)
 with open("/tmp/statusBucket.txt") as f:
     STATUS_BUCKET = f.read().strip()
 with open("/tmp/statusKey.txt") as f:
     STATUS_KEY = f.read().strip()
 
-JOIN_RE = re.compile(r"Player (.+?) joined", re.IGNORECASE)
-LEAVE_RE = re.compile(r"Player (.+?) left", re.IGNORECASE)
+#matches /stats output, e.g. "Players online: 1 / 16 (Solimr [69ms])" - verified against a live server
+PLAYERS_ONLINE_RE = re.compile(r"Players online:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 
 
 def read_service_status():
-    #one of: active, activating, inactive, deactivating, failed, unknown - see systemd.exec(5)/systemctl(1)
+    #systemd only sees server.sh's own process, not the game process it detaches into a screen session -
+    #so `systemctl is-active` would just reflect whether server.sh's brief startup run succeeded, not
+    #whether the actual game is still up. Checking for the game process directly is what server.sh itself
+    #does before accepting any command, so it's the accurate signal.
     try:
-        result = subprocess.run(["systemctl", "is-active", "vintagestory"], capture_output=True, text=True)
-        return result.stdout.strip()
+        result = subprocess.run(["pgrep", "-f", PGREP_PATTERN], capture_output=True)
+        return "active" if result.returncode == 0 else "inactive"
     except Exception:
         return "unknown"
+
+
+def send_console_command(command):
+    #the game has no network API - server.sh's `command` action is the supported way in, injecting text
+    #into the detached screen session's stdin and reading back what the server printed in response
+    try:
+        result = subprocess.run([SERVER_SH, "command", command], capture_output=True, text=True, timeout=15)
+        return result.stdout
+    except Exception:
+        return ""
+
+
+def read_current_players():
+    match = PLAYERS_ONLINE_RE.search(send_console_command("stats"))
+    return int(match.group(1)) if match else None
 
 
 def read_max_players():
@@ -87,23 +106,6 @@ def read_mods():
     return mods
 
 
-def update_online_players(online, offset):
-    try:
-        with open(LOG_PATH) as f:
-            f.seek(offset)
-            for line in f:
-                joined = JOIN_RE.search(line)
-                if joined:
-                    online.add(joined.group(1).strip())
-                    continue
-                left = LEAVE_RE.search(line)
-                if left:
-                    online.discard(left.group(1).strip())
-            return f.tell()
-    except FileNotFoundError:
-        return offset
-
-
 def push_status(status):
     with open(STATUS_TMP_FILE, "w") as f:
         json.dump(status, f)
@@ -112,8 +114,6 @@ def push_status(status):
 
 
 def main():
-    log_offset = os.path.getsize(LOG_PATH) if os.path.exists(LOG_PATH) else 0
-    online_players = set()
     version = read_version()
     last_hash = None
     if os.path.exists(STATE_FILE):
@@ -121,12 +121,15 @@ def main():
             last_hash = f.read().strip()
 
     while True:
-        log_offset = update_online_players(online_players, log_offset)
+        service_status = read_service_status()
         status = {
             "gameName": "vintagestory",
             "version": version,
-            "serviceStatus": read_service_status(),
-            "players": {"current": len(online_players), "max": read_max_players()},
+            "serviceStatus": service_status,
+            "players": {
+                "current": read_current_players() if service_status == "active" else None,
+                "max": read_max_players(),
+            },
             "mods": read_mods(),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }

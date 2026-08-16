@@ -30,5 +30,43 @@ Notes:
 - `Domain` is optional - pass `Domain=""` if you don't want a custom DNS name for this server.
 - `HostedZoneId` must match the value used on your Control Panel stack.
 - The install script pins a specific Vintage Story version (`VSVERSION` near the top of `scripts/VintageStory/install.sh`) - bump it there if you want a newer release.
+- The stack waits for the install to actually finish before reporting success - `aws cloudformation deploy` can take several minutes and will fail with a real error if the install fails, rather than reporting success regardless.
 - After the stack finishes, the instance installs Vintage Story on first boot and then **shuts itself down**. Start it from the control panel when you're ready to play - that's also what triggers the DNS record to be created/updated, so every server's first-ever appearance online goes through the same start flow (rather than the record lagging behind an instance that was already running).
-- The install also sets up a `vintagestory-status-agent` systemd service that reports player count, version, and mods to the control panel every 5 seconds (only pushing on change) - see [`docs/server-status.md`](server-status.md). If player counts don't track correctly, check `server-main.log`'s actual join/leave line format against the regexes in [`scripts/VintageStory/status_agent.py`](../scripts/VintageStory/status_agent.py) and adjust.
+- The join password is generated once and stored in SSM Parameter Store (`game-password-<stack name>`, SecureString) - reinstalling the server (e.g. deleting and redeploying this stack) reuses it rather than generating a new one, since that parameter isn't owned by this stack and survives its deletion. Retrieve it with `aws ssm get-parameter --name game-password-<stack name> --with-decryption --query Parameter.Value --output text`.
+- The install also sets up a `vintagestory-status-agent` systemd service that reports player count, version, and mods to the control panel every 5 seconds (only pushing on change) - see [`docs/server-status.md`](server-status.md). Player count comes from the game's own `/stats` console command, not log parsing; if it isn't tracking correctly, check the regex in [`scripts/VintageStory/status_agent.py`](../scripts/VintageStory/status_agent.py) against what `/stats` actually prints on your server.
+
+## Uploading your world save or mods
+
+The server's data lives under `/home/vintagestory/data` on the EC2 instance - `Saves/` for world files, `Mods/`
+for mods. To copy files there from your machine, you need SSH access; the security group only allows this through
+[EC2 Instance Connect](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-connect.html) (not open SSH),
+so push a short-lived key first:
+
+```bash
+ssh-keygen -t ed25519 -f /tmp/vs-key -N ""
+aws ec2-instance-connect send-ssh-public-key \
+  --instance-id <YOUR_INSTANCE_ID> \
+  --availability-zone <YOUR_AZ, e.g. eu-central-1a> \
+  --instance-os-user ubuntu \
+  --ssh-public-key file:///tmp/vs-key.pub
+```
+
+That key is valid for about a minute, which is enough to start an `scp`/`rsync` copy (the transfer itself can keep
+running once started). **Stop the server first** (`server.sh stop`, or the control panel's Stop button) so nothing's
+mid-write while you copy:
+
+```bash
+# world save
+scp -i /tmp/vs-key -r ./MyWorld.vcdbs ubuntu@<INSTANCE_PUBLIC_IP>:/tmp/
+ssh -i /tmp/vs-key ubuntu@<INSTANCE_PUBLIC_IP> \
+  'sudo mv /tmp/MyWorld.vcdbs /home/vintagestory/data/Saves/ && sudo chown vintagestory:vintagestory /home/vintagestory/data/Saves/MyWorld.vcdbs'
+
+# a mod (zip or folder, whichever the mod ships as)
+scp -i /tmp/vs-key ./mymod.zip ubuntu@<INSTANCE_PUBLIC_IP>:/tmp/
+ssh -i /tmp/vs-key ubuntu@<INSTANCE_PUBLIC_IP> \
+  'sudo mv /tmp/mymod.zip /home/vintagestory/data/Mods/ && sudo chown vintagestory:vintagestory /home/vintagestory/data/Mods/mymod.zip'
+```
+
+Which save the server actually loads on startup is controlled by `serverconfig.json` in that same data folder -
+check Vintage Story's own server documentation for the current field name, since it's changed across versions.
+Once that points at your uploaded save, start the server from the control panel as usual.
