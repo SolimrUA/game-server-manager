@@ -71,6 +71,15 @@ Resources:
         BlockPublicPolicy: True
         IgnorePublicAcls: True
         RestrictPublicBuckets: True
+      #"Download World" zip artifacts (see Control Panel) land under worlds/ - they're one-off downloads,
+      #not meant to accumulate, so expire them automatically rather than relying on anyone to clean them
+      #up by hand.
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-world-download-zips
+            Status: Enabled
+            Prefix: worlds/
+            ExpirationInDays: 3
 
 Outputs:
   VpcId:

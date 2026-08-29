@@ -9,7 +9,12 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt update && apt upgrade -y
-sudo apt install unzip apt-transport-https ca-certificates curl gnupg lsb-release -y
+sudo apt install unzip zip apt-transport-https ca-certificates curl gnupg lsb-release -y
+
+#Canonical's AMI ships the SSM Agent pre-installed and auto-started - this is just cheap insurance for the
+#rare AMI variant where it's present but not running. Needed for the Control Panel's "Download Backup"
+#feature (AWS Systems Manager Run Command). No-op if it's already running.
+sudo snap start amazon-ssm-agent 2>/dev/null || true
 
 #Docker's own apt repo, so docker-ce actually resolves instead of falling back to Ubuntu's bundled docker.io
 sudo install -m 0755 -d /etc/apt/keyrings

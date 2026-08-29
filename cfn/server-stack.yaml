@@ -14,6 +14,8 @@ Metadata:
           - GameServer
           - GameServerSha256
           - GameServerCompanionSha256
+          - DataPath
+          - WorldDownloadPaths
           - InstanceType
           - DiskSize
           - DiskType
@@ -46,6 +48,10 @@ Metadata:
         default: Expected SHA256 of the GameServer script, verified before it runs (see CdkAssetPublisher output)
       GameServerCompanionSha256:
         default: Expected SHA256 of GameServer's companion file, if it has one - leave blank otherwise
+      DataPath:
+        default: Absolute path where this game's world/mod data is mounted on the instance (e.g. /home/vintagestory/data)
+      WorldDownloadPaths:
+        default: Comma-separated subfolders of DataPath to include in "Download World" zips (e.g. Saves,Mods,Playerdata)
       InstanceType:
         default: Select the server size (we recommend selecting a larger instance for initial install and then changing this to a smaller size later).
       DiskSize:
@@ -165,6 +171,24 @@ Parameters:
     AllowedPattern: '^([a-f0-9]{64})?$'
     ConstraintDescription: Must be blank or a 64-character lowercase hex SHA256 digest.
     Default: ''
+    Type: String
+  DataPath:
+    Description: >-
+      Absolute path on the instance where this game's world/mod data is mounted (e.g.
+      /home/vintagestory/data for Vintage Story, /usr/games/serverconfig/valheim for Valheim). Tagged onto
+      the instance so the Control Panel's "Download World" feature can zip the right directory without
+      hardcoding a per-game path table.
+    AllowedPattern: '^/.+$'
+    ConstraintDescription: Must be an absolute path.
+    Type: String
+  WorldDownloadPaths:
+    Description: >-
+      Comma-separated list of paths, relative to DataPath, that "Download World" actually includes in the
+      zip (e.g. "Saves,Mods,Playerdata" for Vintage Story) - everything else in DataPath is left out,
+      deliberately, since it can hold things with no business in a downloadable file (Vintage Story's
+      serverconfig.json has a Password field in it).
+    AllowedPattern: '^[^,]+(,[^,]+)*$'
+    ConstraintDescription: Must be a comma-separated list of relative paths.
     Type: String
   InstanceType:
     Description: 'Select the AWS EC2 instance type you want.  You can change avaialble options later via the AWS Console - see blog entry for more details'
@@ -322,6 +346,10 @@ Resources:
           Value: !Ref HostedZoneId
         - Key: game-name
           Value: !Ref GameName
+        - Key: data-path
+          Value: !Ref DataPath
+        - Key: world-download-paths
+          Value: !Ref WorldDownloadPaths
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -420,10 +448,31 @@ Resources:
                 Resource: !Sub
                   - arn:aws:s3:::${bucket}/status/${GameName}.json
                   - bucket: !ImportValue common-infra-status-bucket-name
+              - Effect: Allow
+                #destination for the "Download World" feature's zip upload (see cfn/control-panel.yaml) -
+                #same shared status bucket, a separate prefix
+                Action: "s3:PutObject"
+                Resource: !Sub
+                  - arn:aws:s3:::${bucket}/worlds/${GameName}/*
+                  - bucket: !ImportValue common-infra-status-bucket-name
+      #lets AWS Systems Manager Run Command reach and execute on this instance (control/data channels +
+      #ssm:UpdateInstanceInformation) - the standard AWS-maintained policy for any SSM-managed instance,
+      #used by the Control Panel's "Download Backup" feature to zip the live data directory on request.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   BackupIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      #Deterministic name (not CFN-generated) so the Control Panel's Lambda - in a different stack, with
+      #no way to !GetAtt this role - can construct its ARN from just the game name, to pass as
+      #backup:StartBackupJob's IamRoleArn for the "Backup Now" button. (Tried tag-based lookup via the
+      #Resource Groups Tagging API first - confirmed live that API simply doesn't index IAM roles at all
+      #in this account, empty results even with no tag filter - so a deterministic name is the only
+      #option.) This forces a one-time IAM role replacement here, which cascades into replacing
+      #TagBasedBackupSelection below (its IamRoleArn references this role) - see the SelectionName comment
+      #there for why that needs a one-time rename too.
+      RoleName: !Sub "${AWS::StackName}-backup-role"
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -535,7 +584,12 @@ Resources:
     Type: "AWS::Backup::BackupSelection"
     Properties:
       BackupSelection:
-        SelectionName: "tag-based-backup-selection"
+        #Renamed (was "tag-based-backup-selection") only because BackupIamRole just gained a RoleName,
+        #which forces IAM role replacement - and since this selection's IamRoleArn references that role,
+        #CloudFormation tries to replace this resource too (create-new-before-delete-old), which AWS
+        #Backup rejects if a selection with the same name already exists on the plan. A one-time rename
+        #dodges that; RoleName is now fixed going forward, so this won't need to change again.
+        SelectionName: "tag-based-backup-selection-v2"
         IamRoleArn: !GetAtt BackupIamRole.Arn
         #IdTagName/IdTagValue alone isn't enough to scope this to just this stack's own resources - that
         #tag pair is deliberately identical across every Server stack (it's how the Control Panel discovers

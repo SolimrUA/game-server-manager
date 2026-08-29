@@ -19,7 +19,12 @@ BASEURL="${INSTALLSCRIPTURL%/*}"
 export DEBIAN_FRONTEND=noninteractive
 
 apt update && apt upgrade -y
-sudo apt install -y wget curl tar unzip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps
+sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps
+
+#Canonical's AMI ships the SSM Agent pre-installed and auto-started - this is just cheap insurance for the
+#rare AMI variant where it's present but not running. Needed for the Control Panel's "Download Backup"
+#feature (AWS Systems Manager Run Command). No-op if it's already running.
+sudo snap start amazon-ssm-agent 2>/dev/null || true
 
 #install AWS CLI
 sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"

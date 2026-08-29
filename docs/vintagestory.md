@@ -14,6 +14,8 @@ aws cloudformation deploy \
       GameServer=<ScriptsBaseUrl FROM CdkAssetPublisher>/VintageStory/install.sh \
       GameServerSha256=<VintageStoryInstallSha256 FROM CdkAssetPublisher> \
       GameServerCompanionSha256=<VintageStoryStatusAgentSha256 FROM CdkAssetPublisher> \
+      DataPath=/home/vintagestory/data \
+      WorldDownloadPaths=Saves,Mods,Playerdata \
       KeyName=<YOUR_EC2_KEY_PAIR> \
       InstanceType=t3a.medium \
       GamingTCPTrafficPortStart=42420 \
@@ -36,6 +38,7 @@ Notes:
 - The stack waits for the install to actually finish before reporting success - `aws cloudformation deploy` can take several minutes and will fail with a real error if the install fails, rather than reporting success regardless.
 - After the stack finishes, the instance installs Vintage Story on first boot and then **shuts itself down**. Start it from the control panel when you're ready to play - that's also what triggers the DNS record to be created/updated, so every server's first-ever appearance online goes through the same start flow (rather than the record lagging behind an instance that was already running).
 - World save, mods, and `serverconfig.json` live on their own EBS volume (`DataVolumeSize` parameter, default 10 GiB), independent of the instance - deleting or replacing the instance (see [redeploying without losing your world](../README.md#redeploying-a-server-without-losing-its-world) in the root README) never touches it. The volume is only ever formatted the first time it's used; a reused one keeps its data, including any manual edits to `serverconfig.json`, exactly as it was left.
+- The Control Panel's "Save World" button triggers an on-demand backup of this volume (same mechanism as the daily scheduled one). "Download World" zips it into a downloadable file - but only the folders listed in `WorldDownloadPaths` (relative to `DataPath`), not the whole volume, since `serverconfig.json` has your join password in it and has no business in a downloadable file. Only works while the instance is running.
 - The join password is generated once and stored in SSM Parameter Store (`game-password-<stack name>`, SecureString) - reinstalling the server (e.g. deleting and redeploying this stack) reuses it rather than generating a new one, since that parameter isn't owned by this stack and survives its deletion. Retrieve it with `aws ssm get-parameter --name game-password-<stack name> --with-decryption --query Parameter.Value --output text`.
 - The install also sets up a `vintagestory-status-agent` systemd service that reports player count, version, and mods to the control panel every 5 seconds (only pushing on change) - see [`docs/server-status.md`](server-status.md). Player count comes from the game's own `/stats` console command, not log parsing; if it isn't tracking correctly, check the regex in [`scripts/VintageStory/status_agent.py`](../scripts/VintageStory/status_agent.py) against what `/stats` actually prints on your server.
 - Run `server.sh` commands (`stop`, `restart`, `command ...`) as the `vintagestory` user (`sudo -u vintagestory /home/vintagestory/server/server.sh restart`), not as `ubuntu` directly - `screen` (which `server.sh` uses to run the game) scopes sessions per-user, so a command run as a different user won't find the session systemd created, even though `ubuntu` is in the `vintagestory` group.

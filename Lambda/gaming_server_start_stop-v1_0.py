@@ -5,6 +5,7 @@
 import boto3
 import json
 import os
+import time
 
 
 def lambda_handler(event, context): #standard function called on lambda invocation
@@ -23,6 +24,8 @@ def lambda_handler(event, context): #standard function called on lambda invocati
     s3 = boto3.client('s3')
     global backup
     backup = boto3.client('backup')
+    global ssm
+    ssm = boto3.client('ssm')
     info = getInfo(tagKey, tagValue)
     
     if len(info['Instances']) < 1:
@@ -86,6 +89,54 @@ def lambda_handler(event, context): #standard function called on lambda invocati
                     statusmessage = "There was an issue resizing your server.  Make sure your target instance type is compatible (e.g. ARM bases servers such as T3g servers cannot be resized to x86 server types such as T3a servers"
             except:
                     statusmessage = "Something went wrong with resizing your server, please try again later"
+    elif event['command'] == "backupNow":
+        #triggers an on-demand AWS Backup job - same mechanism as the daily scheduled one, just kicked off
+        #immediately. This is a genuine full-volume backup (includes serverconfig.json, logs, everything -
+        #not just the essential world data), so it keeps "Backup" naming throughout, distinct from
+        #"Download World" (startWorldDownload/getWorldDownloadStatus below), which is deliberately
+        #filtered to just the essential world data and excludes anything like serverconfig.json's password.
+        accountId = context.invoked_function_arn.split(':')[4]
+        started = []
+        failed = []
+        for i in targetInstances:
+            gameName = i.get('GameName')
+            if not gameName:
+                failed.append(i['InstanceId'])
+                continue
+            try:
+                startBackupNow(gameName, accountId)
+                started.append(gameName)
+            except Exception as e:
+                print("backupNow failed for "+str(gameName)+": "+str(e))
+                failed.append(gameName)
+        if started and not failed:
+            statusmessage = "Backup started for " + ", ".join(started)
+        elif started and failed:
+            statusmessage = "Backup started for " + ", ".join(started) + ", but failed for " + ", ".join(failed)
+        else:
+            statusmessage = "Couldn't start backup, please try again later"
+    elif event['command'] == "startWorldDownload":
+        #returns a different shape than the other commands (no [statusmessage, info] tuple) - the front
+        #end handles this one specially, polling getWorldDownloadStatus rather than showing an alert
+        if not targetInstances:
+            return {"status": "Failed", "error": "No matching instance found"}
+        i = targetInstances[0]
+        gameName = i.get('GameName')
+        dataPath = i.get('DataPath')
+        includePaths = i.get('WorldDownloadPaths')
+        if not gameName or not dataPath or not includePaths:
+            return {"status": "Failed", "error": "Instance is missing its game-name/data-path/world-download-paths tag"}
+        try:
+            return startWorldDownload(i['InstanceId'], gameName, dataPath, includePaths)
+        except Exception as e:
+            print("startWorldDownload failed: "+str(e))
+            return {"status": "Failed", "error": "Could not start the world download"}
+    elif event['command'] == "getWorldDownloadStatus":
+        commandId = event.get('commandId')
+        s3Key = event.get('s3Key')
+        if not targetInstances or not commandId or not s3Key:
+            return {"status": "Failed", "error": "Missing commandId/instanceId/s3Key"}
+        return getWorldDownloadStatus(commandId, targetInstances[0]['InstanceId'], s3Key)
     else:
         statusmessage = "Error - invalid invocation event received"
     return(statusmessage,info)
@@ -115,6 +166,11 @@ def getInfo(tagKey, tagValue):
                         infoDict["hostedZoneId"] = 'No hosted zone tag found'
                 infoDict['PublicIpAddress'] = instance.get('PublicIpAddress','No public IP address')
                 gameName = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'game-name'), None)
+                #resolved server-side from the instance's own tags (not trusted from the client) so
+                #backupNow/startWorldDownload always operate on the game the instance actually is
+                infoDict['GameName'] = gameName
+                infoDict['DataPath'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'data-path'), None)
+                infoDict['WorldDownloadPaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-paths'), None)
                 infoDict['GameStatus'] = getGameStatus(gameName) if infoDict['State'] == 'running' else None
                 #independent of instance State - AWS Backup runs on its own daily schedule against the
                 #EBS data volume regardless of whether the instance itself is stopped
@@ -147,6 +203,71 @@ def getLastBackupTime(gameName):
     except Exception as e:
         print("No backup info available for "+str(gameName)+": "+str(e))
         return None
+
+def startBackupNow(gameName, accountId):
+    #Same call already proven manually: back up the data volume specifically (not the whole instance) -
+    #looked up by its game-name tag, since there's exactly one live data volume per game at a time.
+    #Vault name and the backup role's name both follow the fixed conventions set in cfn/server-stack.yaml
+    #(confirmed live that resourcegroupstaggingapi doesn't index IAM roles at all in this account, so a
+    #tag-based lookup isn't an option - the role's name has to be deterministic instead).
+    region = os.environ.get('AWS_REGION')
+    volumes = ec2.describe_volumes(Filters=[{'Name': 'tag:game-name', 'Values': [gameName]}])['Volumes']
+    if not volumes:
+        raise Exception("No data volume found for "+gameName)
+    volumeArn = 'arn:aws:ec2:'+region+':'+accountId+':volume/'+volumes[0]['VolumeId']
+    vaultName = 'game-server-'+gameName+'-cfn-backup-vault-daily'
+    roleArn = 'arn:aws:iam::'+accountId+':role/service-role/game-server-'+gameName+'-cfn-backup-role'
+    backup.start_backup_job(
+        BackupVaultName=vaultName,
+        ResourceArn=volumeArn,
+        IamRoleArn=roleArn,
+    )
+
+def startWorldDownload(instanceId, gameName, dataPath, includePaths):
+    #Zips specific subfolders of the currently-live, currently-mounted data directory (not the whole
+    #thing - e.g. Vintage Story's serverconfig.json has a Password field in it that has no business in a
+    #downloadable file) via SSM Run Command and uploads the result to the shared status bucket under a
+    #worlds/ prefix. Only works while the instance is running. includePaths is a comma-separated list of
+    #paths relative to dataPath (the world-download-paths tag, set per-game in cfn/server-stack.yaml) -
+    #kept driven by a tag rather than hardcoded here so this stays game-agnostic. The S3 key is built up
+    #front, not parsed out of the command's own output later, which would be fragile.
+    bucket = os.environ.get('statusBucket')
+    key = 'worlds/'+gameName+'/'+instanceId+'-'+str(int(time.time()))+'.zip'
+    folders = ' '.join('"'+p.strip()+'"' for p in includePaths.split(','))
+    commands = [
+        #tolerates any of the listed folders not existing yet (e.g. a brand new world may have no
+        #Playerdata folder) - a straight `zip -r ... f1 f2 f3` would otherwise fail the whole command
+        'cd '+dataPath+' && for p in '+folders+'; do [ -e "$p" ] && zip -r /tmp/worldsave.zip "$p"; done',
+        'aws s3 cp /tmp/worldsave.zip s3://'+bucket+'/'+key,
+        'rm -f /tmp/worldsave.zip',
+    ]
+    #default TimeoutSeconds is 3600 if unset - too short for a multi-GB world; SSM's own max is 172800 (48h)
+    response = ssm.send_command(
+        InstanceIds=[instanceId],
+        DocumentName='AWS-RunShellScript',
+        Parameters={'commands': commands},
+        TimeoutSeconds=14400,
+    )
+    return {"status": "InProgress", "commandId": response['Command']['CommandId'], "s3Key": key}
+
+def getWorldDownloadStatus(commandId, instanceId, s3Key):
+    bucket = os.environ.get('statusBucket')
+    try:
+        result = ssm.get_command_invocation(CommandId=commandId, InstanceId=instanceId)
+    except ssm.exceptions.InvocationDoesNotExist:
+        #can happen briefly right after send_command, before the command has actually registered on the
+        #instance - not a real failure, just keep polling
+        return {"status": "InProgress"}
+    status = result['Status']
+    if status in ('Pending', 'InProgress', 'Delayed'):
+        return {"status": "InProgress"}
+    if status == 'Success':
+        #generating this URL is a local signing operation and succeeds regardless of the signer's actual
+        #permissions - the s3:GetObject grant on this Lambda's role is what makes the URL actually work
+        #when the browser follows it, enforced at click-time, not here
+        url = s3.generate_presigned_url('get_object', Params={'Bucket': bucket, 'Key': s3Key}, ExpiresIn=900)
+        return {"status": "Success", "url": url}
+    return {"status": "Failed", "error": result.get('StandardErrorContent', '')[:500]}
 
 def updateDnsStateFunc(info):
     stepfunction = boto3.client('stepfunctions')

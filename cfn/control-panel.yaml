@@ -121,8 +121,33 @@ Resources:
       RestApiId: !Ref ControlApi
       Type: COGNITO_USER_POOLS
 
-  ControlApiDeployment:
-    DependsOn: ApiGetInfoGetMethod
+  #Confirmed live, twice: adding/changing methods or resources elsewhere in the API does NOT publish them
+  #to the "prod" stage on its own - CloudFormation only republishes when this resource is actually
+  #replaced (changing a property like Description isn't enough - it just patches the existing deployment's
+  #metadata in place, still serving the stale snapshot). The reliable way to force a genuinely new
+  #deployment is bumping THIS RESOURCE'S OWN LOGICAL ID (currently Rev5) - that makes CloudFormation create
+  #a new resource rather than update the existing one. Next endpoint change: rename this to
+  #ControlApiDeploymentRev6, and so on, AND add its GET method to DependsOn below.
+  #
+  #Second bug, found after the first "fix": DependsOn previously listed only ApiGetInfoGetMethod. With no
+  #dependency on the OTHER GET methods, CloudFormation has no guarantee it finishes creating them before
+  #snapshotting this deployment - for methods created in the very same update as a Deployment replacement,
+  #that race is real (confirmed live: new endpoints 403'd with "Missing Authentication Token" - API
+  #Gateway's way of saying the method genuinely isn't in the deployed snapshot - even though the resource
+  #existed and OPTIONS on it worked). Depending on every GET method closes that race for good.
+  #
+  #Rev5: renamed the backup-trigger endpoint back from saveworld to backupnow (see git history) - a path
+  #rename is exactly the kind of change that needs this bump, same as adding a new endpoint does; renaming
+  #a DependsOn entry's VALUE alone does not make CloudFormation replace this resource on its own.
+  ControlApiDeploymentRev5:
+    DependsOn:
+      - ApiGetInfoGetMethod
+      - ApiStartGetMethod
+      - ApiStopGetMethod
+      - ApiResizeGetMethod
+      - ApiBackupNowGetMethod
+      - ApiDownloadWorldStartGetMethod
+      - ApiDownloadWorldStatusGetMethod
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
       RestApiId: !Ref ControlApi
@@ -163,6 +188,33 @@ Resources:
         - ControlApi
         - RootResourceId
       PathPart: stop
+      RestApiId: !Ref ControlApi
+
+  ControlApiResBackupNow:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: backupnow
+      RestApiId: !Ref ControlApi
+
+  ControlApiResDownloadWorldStart:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: downloadworldstart
+      RestApiId: !Ref ControlApi
+
+  ControlApiResDownloadWorldStatus:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: downloadworldstatus
       RestApiId: !Ref ControlApi
 
   ApiGetInfoGetMethod:
@@ -447,6 +499,221 @@ Resources:
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: ResizeOPTIONS
       ResourceId: !Ref ControlApiResResize
+      RestApiId: !Ref ControlApi
+
+  ApiBackupNowGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"backupNow\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: BackupNow
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+      ResourceId: !Ref ControlApiResBackupNow
+      RestApiId: !Ref ControlApi
+
+  ApiBackupNowOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: BackupNowOPTIONS
+      ResourceId: !Ref ControlApiResBackupNow
+      RestApiId: !Ref ControlApi
+
+  ApiDownloadWorldStartGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"startWorldDownload\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: DownloadWorldStart
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+      ResourceId: !Ref ControlApiResDownloadWorldStart
+      RestApiId: !Ref ControlApi
+
+  ApiDownloadWorldStartOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: DownloadWorldStartOPTIONS
+      ResourceId: !Ref ControlApiResDownloadWorldStart
+      RestApiId: !Ref ControlApi
+
+  ApiDownloadWorldStatusGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"getWorldDownloadStatus\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"commandId\": \"$input.params('commandid')\",\r\n \"s3Key\": \"$input.params('s3key')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: DownloadWorldStatus
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+        method.request.querystring.commandid : false
+        method.request.querystring.s3key : false
+      ResourceId: !Ref ControlApiResDownloadWorldStatus
+      RestApiId: !Ref ControlApi
+
+  ApiDownloadWorldStatusOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: DownloadWorldStatusOPTIONS
+      ResourceId: !Ref ControlApiResDownloadWorldStatus
       RestApiId: !Ref ControlApi
 
   StateMachineDNS:
@@ -778,12 +1045,51 @@ Resources:
                       {
                         "Effect": "Allow",
                         "Action": "s3:GetObject",
-                        "Resource": "arn:aws:s3:::${statusBucketName}/status/*"
+                        "Resource": [
+                          "arn:aws:s3:::${statusBucketName}/status/*",
+                          "arn:aws:s3:::${statusBucketName}/worlds/*"
+                        ]
                       },
                       {
                         "Effect": "Allow",
                         "Action": "backup:ListRecoveryPointsByBackupVault",
                         "Resource": "arn:aws:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:game-server-*-backup-vault-daily"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "ec2:DescribeVolumes",
+                        "Resource": "*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "backup:StartBackupJob",
+                        "Resource": "arn:aws:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:game-server-*-backup-vault-daily"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "iam:PassRole",
+                        "Resource": "arn:aws:iam::${AWS::AccountId}:role/service-role/game-server-*-cfn-backup-role",
+                        "Condition": {
+                          "StringEquals": { "iam:PassedToService": "backup.amazonaws.com" }
+                        }
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "ssm:SendCommand",
+                        "Resource": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*",
+                        "Condition": {
+                          "StringEquals": { "ssm:resourceTag/${tagname}": "${tagvalue}" }
+                        }
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "ssm:SendCommand",
+                        "Resource": "arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "ssm:GetCommandInvocation",
+                        "Resource": "*"
                       }
                     ]
                   }
@@ -1128,6 +1434,30 @@ Resources:
       FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/resize
+
+  StartStopLambdaPermissionBackupNow:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/backupnow
+
+  StartStopLambdaPermissionDownloadWorldStart:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/downloadworldstart
+
+  StartStopLambdaPermissionDownloadWorldStatus:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/downloadworldstatus
 
   CopyFrontEndFiles:
     Type: Custom::WebFileCopy

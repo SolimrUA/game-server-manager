@@ -50,6 +50,34 @@ function mcLastBackupText(lastBackupTime) {
   return Math.floor(diffHours / 24) + 'd ago';
 }
 
+// Per-instance world-download state, kept outside the DOM: the table body gets fully torn down and
+// rebuilt on every periodic refresh (see renderTable's `tbody.innerHTML = ''`), which would otherwise wipe
+// out any in-progress download status a couple seconds after it appeared. Read by renderTable on every
+// rebuild (same idea as the existing previouslySelectedInstanceId handling) and updated live by the poll
+// loop in between rebuilds.
+var worldDownloads = {};
+
+function mcWorldDownloadStatusHtml(instanceId) {
+  var dl = worldDownloads[instanceId];
+  if (!dl) return '';
+  if (dl.status === 'Success') return '<a href="' + dl.url + '" target="_blank">Download</a>';
+  if (dl.status === 'Failed') return 'Failed: ' + escapeHtml(dl.error || 'unknown error');
+  if (dl.status === 'RetryPrompt') return '<a href="javascript:void(0)" class="mcRetryWorldDownloadCheck">Still processing - click to check again</a>';
+  return 'Preparing archive…' + (dl.attempt ? ' (' + dl.attempt + ')' : '');
+}
+
+// Pushes the current worldDownloads state into the live DOM, if that row still exists right now (it
+// usually does - this just avoids waiting for the next periodic refresh to reflect a status change).
+function mcRefreshWorldDownloadStatusUi(instanceId) {
+  var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
+  var detailRow = row && row.nextElementSibling;
+  var span = detailRow && detailRow.querySelector('.mcWorldDownloadStatus');
+  if (!span) return;
+  span.innerHTML = mcWorldDownloadStatusHtml(instanceId);
+  var retryLink = span.querySelector('.mcRetryWorldDownloadCheck');
+  if (retryLink) retryLink.onclick = function (e) { e.stopPropagation(); retryWorldDownload(instanceId); };
+}
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -120,6 +148,9 @@ async function renderTable(data) {
         '<option value="large">Large</option>' +
         '</select>' +
         '<button class="btn primary">Resize</button>' +
+        '<button class="btn mcBackupNowBtn">Backup Now</button>' +
+        '<button class="btn mcDownloadWorldBtn">Download World</button>' +
+        '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instance['InstanceId']) + '</span>' +
         '</div>' +
         '<div class="mcModsSection"><h4>Mods</h4>' + renderModsList(status && status.mods) + '</div>' +
         '</td>';
@@ -129,6 +160,10 @@ async function renderTable(data) {
       detailRow.querySelector('.stop').onclick = function (e) { e.stopPropagation(); showAlert('Stopping the Server'); stopServer(instanceId); };
       detailRow.querySelector('.start').onclick = function (e) { e.stopPropagation(); showAlert('Starting the Server'); startServer(instanceId); };
       detailRow.querySelector('.primary').onclick = function (e) { e.stopPropagation(); showAlert('Please wait... Resizing your server'); resizeServer(select.value, instanceId); };
+      detailRow.querySelector('.mcBackupNowBtn').onclick = function (e) { e.stopPropagation(); showAlert('Starting backup'); backupNow(instanceId); };
+      detailRow.querySelector('.mcDownloadWorldBtn').onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
+      var retryLink = detailRow.querySelector('.mcRetryWorldDownloadCheck');
+      if (retryLink) retryLink.onclick = function (e) { e.stopPropagation(); retryWorldDownload(instanceId); };
       detailRow.onclick = function (e) { e.stopPropagation(); };
 
       tbody.appendChild(row);
@@ -238,6 +273,91 @@ async function resizeServer(size, instanceId) {
     await sleep(1000);
     mcInfo(API_URL, jwt);
   }
+}
+
+async function backupNow(instanceId) {
+  var backupUrl = API_URL + "backupnow/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "")
+  var jwt = await getJwt();
+
+  var msg = await fetch(backupUrl, {
+    method: 'get',
+    headers: new Headers({
+      'Authorization': jwt
+    })
+  });
+
+  var msgdata = await msg.json();
+  showAlert(msgdata[0]);
+
+  for (y=0; y<6; y++){
+    await sleep(1000);
+    mcInfo(API_URL, jwt);
+  }
+}
+
+// Zips specific subfolders of the currently-live data directory via SSM Run Command (only works while the
+// server is running) and uploads the result to S3 - see docs/server-status.md and the Control Panel design
+// notes. Kicked off by downloadWorld, then polled by pollWorldDownloadStatus until a presigned download URL
+// comes back.
+// State lives in worldDownloads (not a captured DOM element) since the periodic refresh rebuilds the
+// whole table every few seconds - see the comment on worldDownloads itself.
+async function downloadWorld(instanceId) {
+  worldDownloads[instanceId] = { status: 'InProgress', attempt: 0 };
+  mcRefreshWorldDownloadStatusUi(instanceId);
+  var jwt = await getJwt();
+
+  var startUrl = API_URL + "downloadworldstart/" + query_string + "&instanceid=" + encodeURIComponent(instanceId);
+  var startResp = await fetch(startUrl, { method: 'get', headers: new Headers({ 'Authorization': jwt }) });
+  var startData = await startResp.json();
+
+  if (startData.status === 'Failed') {
+    worldDownloads[instanceId] = { status: 'Failed', error: startData.error || 'could not start' };
+    mcRefreshWorldDownloadStatusUi(instanceId);
+    return;
+  }
+
+  pollWorldDownloadStatus(instanceId, startData.commandId, startData.s3Key, 0);
+}
+
+function retryWorldDownload(instanceId) {
+  var dl = worldDownloads[instanceId];
+  if (!dl || !dl.commandId) return;
+  worldDownloads[instanceId] = { status: 'InProgress', attempt: 0 };
+  mcRefreshWorldDownloadStatusUi(instanceId);
+  pollWorldDownloadStatus(instanceId, dl.commandId, dl.s3Key, 0);
+}
+
+// Zipping+uploading a multi-GB world takes an unbounded amount of time, and API Gateway can't hold a
+// request open past 29s anyway - so this polls a separate status endpoint rather than blocking on one call.
+async function pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt) {
+  var maxAttempts = 60; // 60 * 5s = 5 minutes
+  var jwt = await getJwt();
+  var statusUrl = API_URL + "downloadworldstatus/" + query_string +
+    "&instanceid=" + encodeURIComponent(instanceId) +
+    "&commandid=" + encodeURIComponent(commandId) +
+    "&s3key=" + encodeURIComponent(s3Key);
+  var resp = await fetch(statusUrl, { method: 'get', headers: new Headers({ 'Authorization': jwt }) });
+  var data = await resp.json();
+
+  if (data.status === 'Success') {
+    worldDownloads[instanceId] = { status: 'Success', url: data.url };
+    mcRefreshWorldDownloadStatusUi(instanceId);
+    return;
+  }
+  if (data.status === 'Failed') {
+    worldDownloads[instanceId] = { status: 'Failed', error: data.error };
+    mcRefreshWorldDownloadStatusUi(instanceId);
+    return;
+  }
+  if (attempt >= maxAttempts) {
+    worldDownloads[instanceId] = { status: 'RetryPrompt', commandId: commandId, s3Key: s3Key };
+    mcRefreshWorldDownloadStatusUi(instanceId);
+    return;
+  }
+  worldDownloads[instanceId] = { status: 'InProgress', attempt: attempt + 1 };
+  mcRefreshWorldDownloadStatusUi(instanceId);
+  await sleep(5000);
+  pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt + 1);
 }
 
 async function dnsLookup(dN) {
