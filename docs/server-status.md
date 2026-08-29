@@ -89,5 +89,10 @@ data rather than erroring.
 2. Have that status agent write this JSON shape to the path above on an interval, pushing only on change - including
    `serviceStatus` from whatever process supervisor runs the game (e.g. `systemctl is-active <unit>` for a systemd
    service), so the front-end can distinguish "EC2 running, game not up yet" from "both running".
-3. Nothing else needs to change - the S3 key convention, IAM policy, and Lambda/front-end read path are already
+3. If the agent needs values the setup script only computes once (bucket name, status key, etc.), have the setup
+   script write them under `/etc/game-server-manager/`, not `/tmp` - `/tmp` is cleared on every reboot on this AMI,
+   but a status agent is a long-lived service that restarts on every boot, and every instance goes through at least
+   one reboot automatically (it shuts itself down ~2 minutes after install, then gets started again from the control
+   panel). A value read from `/tmp` at startup will be there on first boot and gone on every one after.
+4. Nothing else needs to change - the S3 key convention, IAM policy, and Lambda/front-end read path are already
    game-agnostic.

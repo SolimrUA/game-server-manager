@@ -85,6 +85,14 @@ Outputs:
     Export:
       Name: common-infra-subnet-id
 
+  SubnetAvailabilityZone:
+    Description: >-
+      AZ of the shared subnet - imported by every Server stack via Fn::ImportValue common-infra-subnet-az
+      so each game's persistent data volume lands in the same AZ its EC2 instance does.
+    Value: !GetAtt Subnet.AvailabilityZone
+    Export:
+      Name: common-infra-subnet-az
+
   StatusBucketName:
     Description: >-
       S3 bucket holding each server's live status snapshot (player count, mods, version - see docs/server-status.md).

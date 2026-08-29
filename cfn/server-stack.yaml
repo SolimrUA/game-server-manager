@@ -12,9 +12,12 @@ Metadata:
         Parameters:
           - GameName
           - GameServer
+          - GameServerSha256
+          - GameServerCompanionSha256
           - InstanceType
           - DiskSize
           - DiskType
+          - DataVolumeSize
           - GamingTCPTrafficPortStart
           - GamingTCPTrafficPortEnd
           - GamingUDPTrafficPortStart
@@ -28,6 +31,7 @@ Metadata:
           - ShutdownTimeHours
           - ShutdownTimeMins
           - IdTagValue
+          - CreateInstance
       - Label:
           default: You should not need to change anything in this section.
         Parameters:
@@ -38,12 +42,20 @@ Metadata:
         default: Short lowercase name for this game, used to name resources (e.g. valheim, vintagestory)
       GameServer:
         default: Choose what game server you wish to install
+      GameServerSha256:
+        default: Expected SHA256 of the GameServer script, verified before it runs (see CdkAssetPublisher output)
+      GameServerCompanionSha256:
+        default: Expected SHA256 of GameServer's companion file, if it has one - leave blank otherwise
       InstanceType:
         default: Select the server size (we recommend selecting a larger instance for initial install and then changing this to a smaller size later).
       DiskSize:
         default: How many Gibibytes would you like?
       DiskType:
         default: What do you want your hard-drive made from (GP3 is recommended)?
+      DataVolumeSize:
+        default: How many Gibibytes for your persistent world/mod data volume? Never lower this once set.
+      CreateInstance:
+        default: Leave as true. Toggle to false then back to true to force a fresh instance without losing your data volume.
       KeyName:
         default: Select the key pair you will use to access server OS
       Domain:
@@ -114,6 +126,45 @@ Parameters:
       - IO2
     Default: gp3
     ConstraintDescription: You must choose a disk type
+    Type: String
+  DataVolumeSize:
+    Description: >-
+      Size in GiB of the persistent volume that holds this server's world/mod data. This volume is
+      independent of the instance - it survives instance replacement, so redeploying this stack never
+      loses your world. Never lower this once set: shrinking forces the volume itself to be replaced, and
+      although this template retains the old volume as a safety net (rather than deleting it), a shrink
+      attempt will still fail confusingly.
+    AllowedPattern: '^([8-9]|([1-9]\d{1,}))$'
+    ConstraintDescription: You must choose a data volume size of at least 8 GiB.
+    Default: '10'
+    Type: String
+  CreateInstance:
+    Description: >-
+      Leave as true for normal use. Set to false, deploy, then back to true and deploy again to force a
+      fresh instance (e.g. to pick up an updated GameServer script) without deleting this whole stack -
+      the persistent data volume and everything else stays intact throughout, only the compute is replaced.
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Type: String
+  GameServerSha256:
+    Description: >-
+      Expected SHA256 of the GameServer script's content (CdkAssetPublisher's ValheimSha256 /
+      VintageStoryInstallSha256 output), verified before the script is ever executed. This is what stops a
+      compromised asset bucket from getting arbitrary code run here - only a script matching the hash you
+      approved at deploy time will run, regardless of what the bucket holds later.
+    AllowedPattern: '^[a-f0-9]{64}$'
+    ConstraintDescription: Must be a 64-character lowercase hex SHA256 digest.
+    Type: String
+  GameServerCompanionSha256:
+    Description: >-
+      Expected SHA256 of a companion file GameServer's script fetches for itself (e.g. Vintage Story's
+      status_agent.py, CdkAssetPublisher's VintageStoryStatusAgentSha256 output). Leave blank for a game
+      whose script has no companion file to verify.
+    AllowedPattern: '^([a-f0-9]{64})?$'
+    ConstraintDescription: Must be blank or a 64-character lowercase hex SHA256 digest.
+    Default: ''
     Type: String
   InstanceType:
     Description: 'Select the AWS EC2 instance type you want.  You can change avaialble options later via the AWS Console - see blog entry for more details'
@@ -239,10 +290,14 @@ Conditions:
     - !Equals
       - !Ref GamingUDPTrafficPortStart
       - ''
+  CreateInstance: !Equals
+    - !Ref CreateInstance
+    - 'true'
 
 Resources:
   EC2Instance:
     Type: 'AWS::EC2::Instance'
+    Condition: CreateInstance
     CreationPolicy:
       ResourceSignal:
         Count: 1
@@ -285,16 +340,51 @@ Resources:
             apt install -y python3-pip
             pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
             trap 'cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}; shutdown -h +2' EXIT
-            echo ${AWS::StackName} > /tmp/paramName.txt
-            echo ${StatusBucket} > /tmp/statusBucket.txt
-            echo ${GameName} > /tmp/statusKey.txt
+            #on the root disk, not /tmp: /tmp is cleared on every reboot (this AMI mounts it as tmpfs), but
+            #status_agent.py re-reads these two values every time it (re)starts, including after every
+            #stop/start cycle - and this instance always goes through at least one, since it auto-shuts-down
+            #~2 minutes after install and gets started again from the Control Panel.
+            mkdir -p /etc/game-server-manager
+            echo ${AWS::StackName} > /etc/game-server-manager/paramName.txt
+            echo ${StatusBucket} > /etc/game-server-manager/statusBucket.txt
+            echo ${GameName} > /etc/game-server-manager/statusKey.txt
+            echo ${DataVolumeId} > /etc/game-server-manager/dataVolumeId.txt
+            echo "${GameServerCompanionSha256}" > /etc/game-server-manager/companionSha256.txt
             mkdir -p /usr/games/install
             cd /usr/games/install
             wget -O gameserverinstall.sh ${GameServer}
+            echo "${GameServerSha256}  gameserverinstall.sh" | sha256sum -c -
             chmod +x gameserverinstall.sh
             ./gameserverinstall.sh "${GameServer}"
           - GameServer: !Ref GameServer
             StatusBucket: !ImportValue common-infra-status-bucket-name
+            DataVolumeId: !Ref GameDataVolume
+            GameServerSha256: !Ref GameServerSha256
+            GameServerCompanionSha256: !Ref GameServerCompanionSha256
+
+  GameDataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AvailabilityZone: !ImportValue common-infra-subnet-az
+      Size: !Ref DataVolumeSize
+      VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub game-server-${GameName}-data
+        - Key: !Ref IdTagName
+          Value: !Ref IdTagValue
+        - Key: game-name
+          Value: !Ref GameName
+
+  GameDataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Condition: CreateInstance
+    Properties:
+      InstanceId: !Ref EC2Instance
+      VolumeId: !Ref GameDataVolume
+      Device: /dev/sdf
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -558,17 +648,38 @@ Resources:
       Policies:
         - PolicyName: bed-time-stop-inline
           PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'logs:CreateLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource: 'arn:aws:logs:*:*:*'
-              - Effect: Allow
-                Action: 'ec2:StopInstances'
-                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${EC2Instance}
+            !Sub
+              - |
+                  {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                      {
+                        "Effect": "Allow",
+                        "Action": [
+                          "logs:CreateLogGroup",
+                          "logs:CreateLogStream",
+                          "logs:PutLogEvents"
+                        ],
+                        "Resource": "arn:aws:logs:*:*:*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "ec2:DescribeInstances",
+                        "Resource": "*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "ec2:StopInstances",
+                        "Resource": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*",
+                        "Condition": {
+                          "StringEquals": {
+                            "ec2:ResourceTag/game-name": "${gameName}"
+                          }
+                        }
+                      }
+                    ]
+                  }
+              - gameName: !Ref GameName
 
   BedTimeStopLambda:
     Type: AWS::Lambda::Function
@@ -577,8 +688,15 @@ Resources:
         ZipFile: |
           import boto3
           def lambda_handler(event, context):
-              boto3.client('ec2').stop_instances(InstanceIds=[event['instanceId']])
-      Description: Stops this stack's own EC2 instance on the daily auto-shutdown schedule
+              ec2 = boto3.client('ec2')
+              response = ec2.describe_instances(Filters=[
+                  {'Name': 'tag:game-name', 'Values': [event['gameName']]},
+                  {'Name': 'instance-state-name', 'Values': ['running']},
+              ])
+              instance_ids = [i['InstanceId'] for r in response['Reservations'] for i in r['Instances']]
+              if instance_ids:
+                  ec2.stop_instances(InstanceIds=instance_ids)
+      Description: Stops this stack's own EC2 instance (found by its game-name tag) on the daily auto-shutdown schedule
       Handler: index.lambda_handler
       Role: !GetAtt BedTimeStopLambdaIamRole.Arn
       Runtime: python3.8
@@ -608,7 +726,7 @@ Resources:
       Targets:
         -   Arn: !GetAtt BedTimeStopLambda.Arn
             Id: BedTimeStopLambdaFunction
-            Input: !Sub '{"instanceId": "${EC2Instance}"}'
+            Input: !Sub '{"gameName": "${GameName}"}'
 
   BedTimeLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -621,11 +739,17 @@ Resources:
 Outputs:
   PublicIp:
     Description: This is the public IP for your gaming server, you will need to run a "start" command to associate your domain name with it (if you selected one)
+    Condition: CreateInstance
     Value: !GetAtt EC2Instance.PublicIp
 
   InstanceId:
     Description: The EC2 instance ID for this game server
+    Condition: CreateInstance
     Value: !Ref EC2Instance
+
+  DataVolumeId:
+    Description: The persistent EBS volume holding this server's world/mod data - survives instance replacement
+    Value: !Ref GameDataVolume
 
   TagName:
     Description: Tag name used.  This should not have been changed, and should be game-server-finder

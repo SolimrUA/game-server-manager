@@ -14,7 +14,7 @@ The solution is split into three CloudFormation templates under [`cfn/`](cfn/):
 
 - **Common** ([`cfn/common-infra.yaml`](cfn/common-infra.yaml)) - shared VPC/networking and the shared server-status S3 bucket. Deploy once per account+region.
 - **Control Panel** ([`cfn/control-panel.yaml`](cfn/control-panel.yaml)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront web site. Deploy once.
-- **Server** ([`cfn/server-stack.yaml`](cfn/server-stack.yaml)) - one EC2 game server and everything scoped to it (Security Group, backups, auto-shutdown, status reporting). Deploy again for each game server you want to run.
+- **Server** ([`cfn/server-stack.yaml`](cfn/server-stack.yaml)) - one EC2 game server and everything scoped to it (Security Group, backups, auto-shutdown, status reporting, a persistent EBS volume for world/mod data that outlives the instance). Deploy again for each game server you want to run.
 
 Each server also reports live player count, game version, and installed mods to the control panel - see [`docs/server-status.md`](docs/server-status.md) for the data flow and how to add reporting for a new game.
 
@@ -23,6 +23,8 @@ The Control Panel has no CloudFormation-level dependency on any Server stack - i
 ## Deploying
 
 None of these stacks fetch anything from the public internet at deploy time - the game install scripts, Lambda code, and web site files all come from an S3 bucket you control, published by `CdkAssetPublisher/`. That's a deliberate choice: nothing here should be downloading and running a script pulled live from GitHub as part of a CloudFormation deploy, and it also means every game server install runs a version of the script you've actually reviewed and pinned, not whatever happens to be on `main` right now.
+
+Each Server stack goes one step further and verifies a script's content against a SHA256 hash pinned at deploy time (`GameServerSha256`, computed by `CdkAssetPublisher` - see step 2) before ever executing it. So even if write access to that bucket were ever compromised, an instance won't run anything that doesn't match what you actually approved the last time you deployed.
 
 Deploy in this order, from the repo root, with `aws cloudformation deploy`. The `--stack-name` values below are a fixed convention - copy them as-is (`game-server-<stack type>-cfn`, and `game-server-<game>-cfn` per server). Everything under `--parameter-overrides` is what you'll actually need to edit; placeholders are wrapped in `<...>`.
 
@@ -66,6 +68,7 @@ This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and 
 - `AssetBucketName` / `AssetKeyPrefix` - pass straight through as the Control Panel's `AssetsBucketName`/`AssetsKeyPrefix` parameters below.
 - `ScriptsBaseUrl` - the base URL for published game install scripts. A given game's `GameServer` parameter is this plus its script's path, e.g. `<ScriptsBaseUrl>/valheim.sh` or `<ScriptsBaseUrl>/VintageStory/install.sh`.
 - `StartStopLambdaKey` / `UpdateDnsLambdaKey` - content-hashed S3 keys for the two Lambda zips, e.g. `Lambda/gaming_server_start_stop-v1_0.<hash>.zip`. Pass these as the Control Panel's parameters of the same name. They're hashed (not fixed filenames) so that changing the Lambda code always produces a different value here - CloudFormation only redeploys `AWS::Lambda::Function` code when this value itself changes, not when the object at an unchanged key does, so a fixed name would let code fixes silently fail to deploy.
+- `ValheimSha256` / `VintageStoryInstallSha256` / `VintageStoryStatusAgentSha256` - SHA256 digests of each script's current content. Pass the relevant one(s) as a Server stack's `GameServerSha256`/`GameServerCompanionSha256` (see each game's deploy guide below) - the instance verifies the script it downloads matches before ever running it.
 
 Re-run `cdk deploy` here any time you change a script, Lambda code, or the front-end files. The front-end/game-script changes take effect on the next Control Panel/Server deploy automatically (same bucket/prefix); Lambda code changes need the Control Panel re-deployed with the new `StartStopLambdaKey`/`UpdateDnsLambdaKey` values from this step's output.
 
@@ -97,6 +100,32 @@ Each game gets its own short deploy guide with the exact command for that game's
 `GameName` names that server's resources (its EC2 `Name` tag becomes `game-server-<GameName>-ec2`) and should match the game in the stack name, e.g. `game-server-valheim-cfn`.
 
 If you have the older single-template version of this solution deployed, note that splitting into three stacks is a breaking change - CloudFormation can't migrate resources out of a live stack into new ones. Back up anything you care about, delete the old stack, then deploy the stacks above.
+
+### Redeploying a server without losing its world
+
+A Server stack's world/mod data lives on its own EBS volume (`GameDataVolume`), independent of the EC2 instance - deleting or replacing the instance never touches it, and the volume is retained even if the stack itself is deleted. The instance's own `UserData` only ever runs once per instance (a cloud-init property, not something CloudFormation controls), so picking up an updated install script or template change always means a fresh instance - the `CreateInstance` parameter (`true`/`false`, default `true`) does that without deleting the whole stack, which would take the data volume down with it:
+
+```bash
+# 1. stop the game cleanly first (control panel Stop button, or):
+aws ec2 stop-instances --instance-ids <INSTANCE_ID>
+aws ec2 wait instance-stopped --instance-ids <INSTANCE_ID>
+
+# 2. if a script changed, republish it first to get a fresh hash:
+(cd CdkAssetPublisher && cdk deploy)
+
+# 3. tear down just the instance - the data volume, backups, IAM, etc. all stay
+aws cloudformation deploy --template-file cfn/server-stack.yaml \
+  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_IAM \
+  --parameter-overrides CreateInstance=false
+
+# 4. bring up a fresh instance - the volume reattaches (not reformats)
+aws cloudformation deploy --template-file cfn/server-stack.yaml \
+  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_IAM \
+  --parameter-overrides CreateInstance=true \
+      GameServerSha256=<ValheimSha256 or VintageStoryInstallSha256 FROM STEP 2>
+```
+
+Any parameter left out of `--parameter-overrides` keeps its previous value (`aws cloudformation deploy` fills in `UsePreviousValue` for anything you don't pass), so step 4 only needs whatever actually changed - typically just the hash from a fresh publish.
 
 ## Security
 

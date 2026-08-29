@@ -22,8 +22,9 @@ import (
 
 type AssetPublisherStackProps struct {
 	awscdk.StackProps
-	Config     Config
-	LambdaKeys LambdaKeys
+	Config       Config
+	LambdaKeys   LambdaKeys
+	ScriptHashes ScriptHashes
 }
 
 // LambdaKeys holds the content-addressed S3 keys (relative to AssetKeyPrefix) that each Lambda zip was
@@ -33,14 +34,25 @@ type LambdaKeys struct {
 	UpdateDnsLambdaKey string
 }
 
+// ScriptHashes holds full SHA256 hex digests of the game scripts that get fetched-and-executed on an
+// EC2 instance. Server stacks take these as parameters and verify a script matches before ever running
+// it, so a compromised bucket can't get anything executed that wasn't approved at deploy time.
+type ScriptHashes struct {
+	ValheimSha256                 string
+	VintageStoryInstallSha256     string
+	VintageStoryStatusAgentSha256 string
+}
+
 func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetPublisherStackProps) awscdk.Stack {
 	var stackProps awscdk.StackProps
 	var config Config
 	var lambdaKeys LambdaKeys
+	var scriptHashes ScriptHashes
 	if props != nil {
 		stackProps = props.StackProps
 		config = props.Config
 		lambdaKeys = props.LambdaKeys
+		scriptHashes = props.ScriptHashes
 	}
 
 	stack := awscdk.NewStack(scope, &id, &stackProps)
@@ -96,6 +108,15 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	awscdk.NewCfnOutput(stack, jsii.String("UpdateDnsLambdaKey"), &awscdk.CfnOutputProps{
 		Value: jsii.String(lambdaKeys.UpdateDnsLambdaKey),
 	})
+	awscdk.NewCfnOutput(stack, jsii.String("ValheimSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.ValheimSha256),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("VintageStoryInstallSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.VintageStoryInstallSha256),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("VintageStoryStatusAgentSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.VintageStoryStatusAgentSha256),
+	})
 
 	return stack
 }
@@ -103,7 +124,7 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 func main() {
 	config, err := LoadConfig()
 	must(err)
-	lambdaKeys, err := prepareAssets(config)
+	lambdaKeys, scriptHashes, err := prepareAssets(config)
 	must(err)
 
 	app := awscdk.NewApp(nil)
@@ -111,8 +132,9 @@ func main() {
 		StackProps: awscdk.StackProps{
 			Env: env(config),
 		},
-		Config:     config,
-		LambdaKeys: lambdaKeys,
+		Config:       config,
+		LambdaKeys:   lambdaKeys,
+		ScriptHashes: scriptHashes,
 	})
 	app.Synth(nil)
 }
@@ -124,29 +146,64 @@ func env(config Config) *awscdk.Environment {
 	}
 }
 
-func prepareAssets(config Config) (LambdaKeys, error) {
+func prepareAssets(config Config) (LambdaKeys, ScriptHashes, error) {
 	if err := os.RemoveAll(config.LocalAssetBuildDir); err != nil {
-		return LambdaKeys{}, err
+		return LambdaKeys{}, ScriptHashes{}, err
 	}
 
 	if err := copyDir("../scripts", config.LocalScriptsBuildDir); err != nil {
-		return LambdaKeys{}, err
+		return LambdaKeys{}, ScriptHashes{}, err
 	}
 
 	if err := copyDir("../FrontEnd", config.LocalFrontendBuildDir); err != nil {
-		return LambdaKeys{}, err
+		return LambdaKeys{}, ScriptHashes{}, err
 	}
 
 	startStopKey, err := zipLambdaContentAddressed(config, "../Lambda/gaming_server_start_stop-v1_0.py", "gaming_server_start_stop-v1_0")
 	if err != nil {
-		return LambdaKeys{}, err
+		return LambdaKeys{}, ScriptHashes{}, err
 	}
 	updateDnsKey, err := zipLambdaContentAddressed(config, "../Lambda/update-dns-v1_0.py", "update-dns-v1_0")
 	if err != nil {
-		return LambdaKeys{}, err
+		return LambdaKeys{}, ScriptHashes{}, err
 	}
 
-	return LambdaKeys{StartStopLambdaKey: startStopKey, UpdateDnsLambdaKey: updateDnsKey}, nil
+	valheimHash, err := sha256File("../scripts/valheim.sh")
+	if err != nil {
+		return LambdaKeys{}, ScriptHashes{}, err
+	}
+	vsInstallHash, err := sha256File("../scripts/VintageStory/install.sh")
+	if err != nil {
+		return LambdaKeys{}, ScriptHashes{}, err
+	}
+	vsStatusAgentHash, err := sha256File("../scripts/VintageStory/status_agent.py")
+	if err != nil {
+		return LambdaKeys{}, ScriptHashes{}, err
+	}
+
+	return LambdaKeys{StartStopLambdaKey: startStopKey, UpdateDnsLambdaKey: updateDnsKey},
+		ScriptHashes{
+			ValheimSha256:                 valheimHash,
+			VintageStoryInstallSha256:     vsInstallHash,
+			VintageStoryStatusAgentSha256: vsStatusAgentHash,
+		}, nil
+}
+
+// sha256File returns the full lowercase-hex SHA256 digest of a file's contents, in the same format
+// `sha256sum` produces - so it can be compared with `sha256sum -c` on the receiving end without any
+// reformatting.
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 func copyDir(source, destination string) error {

@@ -22,9 +22,12 @@ SERVER_SH = "/home/vintagestory/server/server.sh"
 #server.sh identifies its own process this way (see PGREPTEST in server.sh) - matching it here means our
 #liveness check agrees with the game's own tooling rather than guessing independently
 PGREP_PATTERN = "dotnet VintagestoryServer.dll --dataPath {}".format(DATA_PATH)
-with open("/tmp/statusBucket.txt") as f:
+#read from /etc/game-server-manager, not /tmp: /tmp is cleared on every reboot on this AMI (tmpfs), but
+#this module-level code runs every time this long-lived service (re)starts, including after a reboot -
+#and this instance always goes through at least one, since it auto-shuts-down ~2 minutes after install.
+with open("/etc/game-server-manager/statusBucket.txt") as f:
     STATUS_BUCKET = f.read().strip()
-with open("/tmp/statusKey.txt") as f:
+with open("/etc/game-server-manager/statusKey.txt") as f:
     STATUS_KEY = f.read().strip()
 
 #matches /stats output, e.g. "Players online: 1 / 16 (Solimr [69ms])" - verified against a live server

@@ -25,7 +25,7 @@ sudo unzip awscliv2.zip
 sudo ./aws/install
 
 #get stackname created by user data script and update SSM parameter name with this to make it unique
-STACKNAME=$(</tmp/paramName.txt)
+STACKNAME=$(</etc/game-server-manager/paramName.txt)
 PARAMNAME=game-password-$STACKNAME
 
 #reuse the join password across reinstalls of this same stack instead of minting a new one every time;
@@ -40,7 +40,12 @@ fi
 #install docker and valheim app on docker
 sudo apt install docker-ce docker-ce-cli containerd.io docker-compose-plugin -y
 sudo usermod -aG docker $USER
-sudo mkdir /usr/games/serverconfig
+
+#docker-compose.yml itself lives on the ephemeral root disk (it's just config, safe to regenerate on every
+#new instance) and points at ./valheim/{saves,server,backups} for its bind mounts - those subdirectories
+#live on the persistent data volume mounted below, so world saves/backups survive instance replacement
+#even though this file doesn't.
+sudo mkdir -p /usr/games/serverconfig
 cd /usr/games/serverconfig
 sudo bash -c 'echo "version: \"3\"
 services:
@@ -69,5 +74,87 @@ services:
       - ./valheim/saves:/home/steam/.config/unity3d/IronGate/Valheim
       - ./valheim/server:/home/steam/valheim
       - ./valheim/backups:/home/steam/backups" >> docker-compose.yml'
-echo "@reboot root (cd /usr/games/serverconfig/ && docker compose up -d)" > /etc/cron.d/awsgameserver
-sudo docker compose up -d
+
+#The persistent data volume (world saves/backups) is a separate EC2 resource from this instance, attached
+#by CloudFormation only after this whole setup script finishes and signals success - that's deliberate, so
+#a broken setup script fails fast without ever touching game data, and so the instance never blocks its own
+#creation waiting on storage. Once CloudFormation actually attaches the volume, systemd's own built-in udev
+#integration notices the new block device and starts the service below automatically - no custom udev rule
+#needed, just a unit that names the device by its stable by-id path (NVMe device names like /dev/nvme1n1
+#aren't predictable on these Nitro instances, but this path is).
+DATA_VOLUME_ID=$(</etc/game-server-manager/dataVolumeId.txt)
+VOLUME_ID_NO_DASH="${DATA_VOLUME_ID//-/}"
+DEVICE_PATH="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${VOLUME_ID_NO_DASH}"
+DEVICE_UNIT=$(systemd-escape --path --suffix=device "$DEVICE_PATH")
+
+sudo bash -c 'cat > /usr/local/bin/valheim-prepare-data.sh' <<'PREPARE_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+DEVICE="$1"
+MOUNT_POINT=/usr/games/serverconfig/valheim
+LABEL=gamedata
+
+RESOLVED=$(readlink -f "$DEVICE")
+if ! blkid -o value -s TYPE "$RESOLVED" >/dev/null 2>&1; then
+  echo "No filesystem on $RESOLVED - first use of this volume, formatting"
+  mkfs.ext4 -L "$LABEL" "$RESOLVED"
+else
+  echo "$RESOLVED already has data - preserving it"
+fi
+
+mkdir -p "$MOUNT_POINT"
+grep -q "^LABEL=${LABEL} " /etc/fstab || echo "LABEL=${LABEL} ${MOUNT_POINT} ext4 defaults,nofail 0 2" >> /etc/fstab
+systemctl daemon-reload
+#on a fresh volume this is the only thing that mounts it. On a reused one, systemd's own fstab-generated
+#mount unit may already have raced ahead and mounted it during normal boot (the fstab entry above was
+#written by a previous run of this same script) - `mount` would then fail with "already mounted", so only
+#call it if the path isn't live yet.
+mountpoint -q "$MOUNT_POINT" || mount "$MOUNT_POINT"
+#docker itself creates the saves/server/backups subdirectories under this mount on first `compose up`,
+#whether the volume is fresh or already has them from a previous instance - nothing else to bootstrap here.
+PREPARE_SCRIPT
+sudo chmod +x /usr/local/bin/valheim-prepare-data.sh
+
+sudo bash -c "cat > /etc/systemd/system/valheim-data.service" <<EOF
+[Unit]
+Description=Prepare and mount the persistent Valheim data volume
+BindsTo=${DEVICE_UNIT}
+After=${DEVICE_UNIT}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/valheim-prepare-data.sh '${DEVICE_PATH}'
+
+[Install]
+WantedBy=${DEVICE_UNIT}
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable valheim-data.service
+
+#systemd unit so the server starts once its data is actually mounted (and again on any future boot, or
+#restart), replacing the previous @reboot cron entry - RequiresMountsFor is what lets systemd defer
+#starting the container until the mount is genuinely live, however long that takes (the volume attaches
+#well after this setup script finishes, via CloudFormation, completely decoupled from this boot).
+sudo bash -c 'cat > /etc/systemd/system/docker-compose-valheim.service' <<EOF
+[Unit]
+Description=Valheim Dedicated Server (docker compose)
+After=network.target docker.service valheim-data.service
+Requires=docker.service
+RequiresMountsFor=/usr/games/serverconfig/valheim
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/usr/games/serverconfig
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable docker-compose-valheim.service

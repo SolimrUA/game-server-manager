@@ -38,8 +38,10 @@ sudo /tmp/dotnet-install.sh --runtime dotnet --channel 10.0 --install-dir /usr/s
 #checking the runtime files directly, which a bare --install-dir install doesn't provide on its own
 sudo ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
 
-#get stackname created by user data script and update SSM parameter name with this to make it unique
-STACKNAME=$(</tmp/paramName.txt)
+#get stackname created by user data script and update SSM parameter name with this to make it unique.
+#Read from /etc/game-server-manager, not /tmp: /tmp is cleared on every reboot on this AMI (tmpfs), and
+#this same value gets re-read later by vintagestory-prepare-data.sh, which can run after a reboot too.
+STACKNAME=$(</etc/game-server-manager/paramName.txt)
 PARAMNAME=game-password-$STACKNAME
 
 #reuse the join password across reinstalls of this same stack instead of minting a new one every time;
@@ -58,13 +60,17 @@ VSNAME=" "
 
 #create a dedicated, unprivileged user to run the server under. Add the default ubuntu login user to its
 #group so you can actually browse/inspect the install over SSH without sudo for every command - server.sh
-#itself already special-cases a caller that shares this group (see GROUPNAME in as_user()).
+#itself already special-cases a caller that shares this group (see GROUPNAME in as_user()). The data
+#directory itself isn't created here - it's a mount point, created by the data-prepare script below once
+#the persistent volume actually attaches.
 id -u vintagestory &>/dev/null || sudo useradd vintagestory -m
 sudo usermod -aG vintagestory ubuntu
-sudo mkdir -p /home/vintagestory/server /home/vintagestory/data
+sudo mkdir -p /home/vintagestory/server
 echo $VSVERSION | sudo -u vintagestory tee /home/vintagestory/version.txt > /dev/null
 
-#download and unpack the dedicated server - this also gives us server.sh, the game's own launcher script
+#download and unpack the dedicated server - this also gives us server.sh, the game's own launcher script.
+#This is ephemeral (redownloaded fresh on every new instance, unlike the persistent data volume), which is
+#fine - it's the game binary, not anything a player created.
 cd /tmp
 sudo wget -O vs_server.tar.gz "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VSVERSION}.tar.gz"
 sudo tar -C /home/vintagestory/server -xzf vs_server.tar.gz
@@ -75,24 +81,93 @@ sudo chmod +x /home/vintagestory/server/VintagestoryServer /home/vintagestory/se
 #the same per-instance data path everything else here already uses
 sudo sed -i "s|^DATAPATH='/var/vintagestory/data'|DATAPATH='/home/vintagestory/data'|" /home/vintagestory/server/server.sh
 
-#running the server once (and letting it time out) makes it write the default serverconfig.json,
-#which we then patch with our own port/name/password/visibility settings before the real start
-sudo -u vintagestory timeout 30 /home/vintagestory/server/VintagestoryServer --dataPath /home/vintagestory/data || true
+#The persistent data volume (world save, mods, serverconfig.json) is a separate EC2 resource from this
+#instance, attached by CloudFormation only after this whole setup script finishes and signals success -
+#that's deliberate, so a broken setup script fails fast without ever touching game data, and so the
+#instance never blocks its own creation waiting on storage. Once CloudFormation actually attaches the
+#volume, systemd's own built-in udev integration notices the new block device and starts the service
+#below automatically - no custom udev rule needed, just a unit that names the device by its stable by-id
+#path (NVMe device names like /dev/nvme1n1 aren't predictable on these Nitro instances, but this path is).
+DATA_VOLUME_ID=$(</etc/game-server-manager/dataVolumeId.txt)
+VOLUME_ID_NO_DASH="${DATA_VOLUME_ID//-/}"
+DEVICE_PATH="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${VOLUME_ID_NO_DASH}"
+DEVICE_UNIT=$(systemd-escape --path --suffix=device "$DEVICE_PATH")
 
-CONFIGFILE=/home/vintagestory/data/serverconfig.json
-sudo -u vintagestory jq \
-  --argjson port $VSPORT \
-  --arg name "$VSNAME" \
-  --arg pw "$VSPW" \
-  '.Port=$port | .ServerName=$name | .Password=$pw | .Upnp=false | WhitelistMode=1 | VerifyPlayerAuth=false' \
-  $CONFIGFILE | sudo -u vintagestory tee /tmp/serverconfig.json.tmp > /dev/null
-sudo -u vintagestory mv /tmp/serverconfig.json.tmp $CONFIGFILE
+sudo bash -c 'cat > /usr/local/bin/vintagestory-prepare-data.sh' <<'PREPARE_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+DEVICE="$1"
+VSPORT="$2"
+VSNAME="$3"
+MOUNT_POINT=/home/vintagestory/data
+LABEL=gamedata
 
-#systemd unit so the server starts on boot. Runs through server.sh (the game's own launcher) rather than
-#the raw binary, since server.sh runs the game inside a detached `screen` session - that's also what makes
-#it possible to send the server console commands later (e.g. status_agent.py querying player counts) via
-#`screen -X stuff`, which the raw binary has no equivalent for. server.sh does its own privilege drop to
-#the vintagestory user internally (via su), so this runs as root.
+RESOLVED=$(readlink -f "$DEVICE")
+if ! blkid -o value -s TYPE "$RESOLVED" >/dev/null 2>&1; then
+  echo "No filesystem on $RESOLVED - first use of this volume, formatting"
+  mkfs.ext4 -L "$LABEL" "$RESOLVED"
+else
+  echo "$RESOLVED already has data - preserving it"
+fi
+
+mkdir -p "$MOUNT_POINT"
+grep -q "^LABEL=${LABEL} " /etc/fstab || echo "LABEL=${LABEL} ${MOUNT_POINT} ext4 defaults,nofail 0 2" >> /etc/fstab
+systemctl daemon-reload
+#on a fresh volume this is the only thing that mounts it. On a reused one, systemd's own fstab-generated
+#mount unit may already have raced ahead and mounted it during normal boot (the fstab entry above was
+#written by a previous run of this same script) - `mount` would then fail with "already mounted", so only
+#call it if the path isn't live yet.
+mountpoint -q "$MOUNT_POINT" || mount "$MOUNT_POINT"
+chown -R vintagestory:vintagestory /home/vintagestory
+
+if [ ! -f "$MOUNT_POINT/serverconfig.json" ]; then
+  echo "No serverconfig.json on this volume yet - bootstrapping a fresh one"
+  #running the server once (and letting it time out) makes it write the default serverconfig.json,
+  #which we then patch with our own port/name/password/visibility settings before the real start.
+  #Only happens for a genuinely fresh volume - a reused one keeps whatever config it already has,
+  #including any manual edits, untouched.
+  sudo -u vintagestory timeout 30 /home/vintagestory/server/VintagestoryServer --dataPath "$MOUNT_POINT" || true
+
+  VSPW=$(aws ssm get-parameter --name "game-password-$(cat /etc/game-server-manager/paramName.txt)" --with-decryption --query Parameter.Value --output text)
+  sudo -u vintagestory jq \
+    --argjson port "$VSPORT" \
+    --arg name "$VSNAME" \
+    --arg pw "$VSPW" \
+    '.Port=$port | .ServerName=$name | .Password=$pw | .Upnp=false | .WhitelistMode=1 | .VerifyPlayerAuth=false' \
+    "$MOUNT_POINT/serverconfig.json" | sudo -u vintagestory tee /tmp/serverconfig.json.tmp > /dev/null
+  sudo -u vintagestory mv /tmp/serverconfig.json.tmp "$MOUNT_POINT/serverconfig.json"
+fi
+PREPARE_SCRIPT
+sudo chmod +x /usr/local/bin/vintagestory-prepare-data.sh
+
+sudo bash -c "cat > /etc/systemd/system/vintagestory-data.service" <<EOF
+[Unit]
+Description=Prepare and mount the persistent Vintage Story data volume
+BindsTo=${DEVICE_UNIT}
+After=${DEVICE_UNIT}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/vintagestory-prepare-data.sh '${DEVICE_PATH}' '${VSPORT}' '${VSNAME}'
+
+[Install]
+WantedBy=${DEVICE_UNIT}
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable vintagestory-data.service
+
+#systemd unit so the server starts once its data is actually mounted (and again on any future boot, or
+#restart). Runs through server.sh (the game's own launcher) rather than the raw binary, since server.sh
+#runs the game inside a detached `screen` session - that's also what makes it possible to send the server
+#console commands later (e.g. status_agent.py querying player counts) via `screen -X stuff`, which the raw
+#binary has no equivalent for. server.sh does its own privilege drop to the vintagestory user internally
+#(via su), so this runs as root.
+#
+#RequiresMountsFor, not a hardcoded ordering on vintagestory-data.service: this is what lets systemd defer
+#starting the game until the mount is genuinely live, however long that takes (the volume attaches well
+#after this setup script finishes, via CloudFormation, completely decoupled from this boot).
 #
 #Type=oneshot + RemainAfterExit, not Type=forking: the actual game process ends up living inside a
 #screen session, not as a traceable child of this unit, so systemd's forking-mode heuristics can't find
@@ -102,7 +177,8 @@ sudo -u vintagestory mv /tmp/serverconfig.json.tmp $CONFIGFILE
 sudo bash -c 'cat > /etc/systemd/system/vintagestory.service' <<EOF
 [Unit]
 Description=Vintage Story Dedicated Server
-After=network.target
+After=network.target vintagestory-data.service
+RequiresMountsFor=/home/vintagestory/data
 
 [Service]
 Type=oneshot
@@ -118,11 +194,14 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory
-sudo systemctl start vintagestory
 
 #status agent - see docs/server-status.md and status_agent.py for details. Fetched from alongside this
 #install script so it tracks whichever copy (fork or published S3 assets) served install.sh itself.
 sudo wget -O /home/vintagestory/status_agent.py "${BASEURL}/status_agent.py"
+COMPANION_SHA256=$(</etc/game-server-manager/companionSha256.txt)
+if [ -n "$COMPANION_SHA256" ]; then
+  echo "${COMPANION_SHA256}  /home/vintagestory/status_agent.py" | sha256sum -c -
+fi
 sudo chown vintagestory:vintagestory /home/vintagestory/status_agent.py
 sudo chmod +x /home/vintagestory/status_agent.py
 
@@ -131,6 +210,7 @@ sudo bash -c 'cat > /etc/systemd/system/vintagestory-status-agent.service' <<EOF
 Description=Vintage Story status agent (player count/mods/version to S3)
 After=vintagestory.service
 Requires=vintagestory.service
+RequiresMountsFor=/home/vintagestory/data
 
 [Service]
 Type=simple
@@ -146,4 +226,3 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory-status-agent
-sudo systemctl start vintagestory-status-agent
