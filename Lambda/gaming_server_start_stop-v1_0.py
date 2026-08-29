@@ -21,6 +21,8 @@ def lambda_handler(event, context): #standard function called on lambda invocati
 
     ec2 = boto3.client('ec2') #Sets up ec2 as the object to call the boto3 (AWS Python SDK) client library for the EC2 service
     s3 = boto3.client('s3')
+    global backup
+    backup = boto3.client('backup')
     info = getInfo(tagKey, tagValue)
     
     if len(info['Instances']) < 1:
@@ -114,6 +116,9 @@ def getInfo(tagKey, tagValue):
                 infoDict['PublicIpAddress'] = instance.get('PublicIpAddress','No public IP address')
                 gameName = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'game-name'), None)
                 infoDict['GameStatus'] = getGameStatus(gameName) if infoDict['State'] == 'running' else None
+                #independent of instance State - AWS Backup runs on its own daily schedule against the
+                #EBS data volume regardless of whether the instance itself is stopped
+                infoDict['LastBackupTime'] = getLastBackupTime(gameName)
                 info["Instances"].append(infoDict)
     return(info)
 
@@ -127,6 +132,20 @@ def getGameStatus(gameName):
         return json.loads(obj['Body'].read())
     except Exception as e:
         print("No game status available for "+str(gameName)+": "+str(e))
+        return None
+
+def getLastBackupTime(gameName):
+    #Vault name follows the fixed convention set in cfn/server-stack.yaml (BackupVaultName: "${AWS::StackName}-backup-vault-daily",
+    #where StackName is "game-server-<gameName>-cfn"), so it can be derived here without a lookup.
+    if not gameName:
+        return None
+    vaultName = 'game-server-' + gameName + '-cfn-backup-vault-daily'
+    try:
+        points = backup.list_recovery_points_by_backup_vault(BackupVaultName=vaultName)['RecoveryPoints']
+        completed = [p['CreationDate'] for p in points if p.get('Status') == 'COMPLETED']
+        return max(completed).strftime('%Y-%m-%dT%H:%M:%SZ') if completed else None
+    except Exception as e:
+        print("No backup info available for "+str(gameName)+": "+str(e))
         return None
 
 def updateDnsStateFunc(info):

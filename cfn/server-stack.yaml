@@ -442,11 +442,16 @@ Resources:
                 Action:
                   - ec2:CreateTags
                   - ec2:DeleteSnapshot
-                Resource: arn:aws:ec2:*::snapshot/*
+                Resource:
+                  - arn:aws:ec2:*::snapshot/*
+                  - arn:aws:ec2:*:*:volume/*
               - Effect: Allow
                 Action:
                   - ec2:CreateImage
                   - ec2:DeregisterImage
+                  #restoring an EBS-type recovery point creates a brand new volume from its snapshot -
+                  #CreateVolume can't be scoped to a specific ARN since the volume doesn't exist yet.
+                  - ec2:CreateVolume
                 Resource: "*"
               - Effect: Allow
                 Action:
@@ -468,6 +473,10 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                   - ec2:DescribeElasticGpus
                   - ec2:DescribeSpotInstanceRequests
+                  #EC2 Describe* actions don't support resource-level scoping - the ec2:DescribeVolumes
+                  #grant further down, scoped to snapshot/volume ARNs, is silently ineffective. Needs
+                  #Resource: "*" here to actually work, same as every other Describe* action in this policy.
+                  - ec2:DescribeVolumes
                 Resource: "*"
               - Effect: Allow
                 Action:
@@ -528,10 +537,18 @@ Resources:
       BackupSelection:
         SelectionName: "tag-based-backup-selection"
         IamRoleArn: !GetAtt BackupIamRole.Arn
+        #IdTagName/IdTagValue alone isn't enough to scope this to just this stack's own resources - that
+        #tag pair is deliberately identical across every Server stack (it's how the Control Panel discovers
+        #instances), so a selection matching only on it pulls in every other game's instance/volume too.
+        #Both EC2Instance and GameDataVolume are also tagged with game-name, which is unique per stack -
+        #ANDing on it here scopes each stack's vault to just its own resources.
         ListOfTags:
           - ConditionType: "STRINGEQUALS"
             ConditionKey: !Ref IdTagName
             ConditionValue: !Ref IdTagValue
+          - ConditionType: "STRINGEQUALS"
+            ConditionKey: "game-name"
+            ConditionValue: !Ref GameName
       BackupPlanId: !Ref BackupPlan
 
   GetSrcIpsLambdaIamRole:

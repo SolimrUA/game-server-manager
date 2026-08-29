@@ -40,6 +40,16 @@ function mcGameStatus(instance) {
   return { text: 'Starting…', badgeClass: 'pending' };
 }
 
+// LastBackupTime comes from AWS Backup, independent of the instance's own State - the daily backup runs
+// on its own schedule against the EBS data volume regardless of whether the game is running.
+function mcLastBackupText(lastBackupTime) {
+  if (!lastBackupTime) return '—';
+  var diffHours = Math.floor((Date.now() - new Date(lastBackupTime).getTime()) / (1000 * 60 * 60));
+  if (diffHours < 1) return '<1h ago';
+  if (diffHours < 24) return diffHours + 'h ago';
+  return Math.floor(diffHours / 24) + 'd ago';
+}
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -66,7 +76,7 @@ async function renderTable(data) {
     var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
 
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
+      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="9">No gaming server instances found</td></tr>';
       return;
     }
 
@@ -94,12 +104,13 @@ async function renderTable(data) {
         '<td>' + (gameStatus.badgeClass ? '<span class="mcBadge ' + gameStatus.badgeClass + '">' + gameStatus.text + '</span>' : gameStatus.text) + '</td>' +
         '<td>' + instance['InstanceType'] + '</td>' +
         '<td>' + playersText + '</td>' +
-        '<td>' + versionText + '</td>';
+        '<td>' + versionText + '</td>' +
+        '<td>' + mcLastBackupText(instance['LastBackupTime']) + '</td>';
 
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
-        '<td colspan="8"><div class="mcDetailInner">' +
+        '<td colspan="9"><div class="mcDetailInner">' +
         '<button class="btn stop">Stop</button>' +
         '<button class="btn start">Start</button>' +
         '<select class="mcResizeSelect">' +

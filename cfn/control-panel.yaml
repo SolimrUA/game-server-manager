@@ -779,6 +779,11 @@ Resources:
                         "Effect": "Allow",
                         "Action": "s3:GetObject",
                         "Resource": "arn:aws:s3:::${statusBucketName}/status/*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "backup:ListRecoveryPointsByBackupVault",
+                        "Resource": "arn:aws:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:game-server-*-backup-vault-daily"
                       }
                     ]
                   }
