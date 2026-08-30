@@ -174,10 +174,7 @@ async function renderTable(data) {
       var canLifecycle = mcIsAdmin || instance['UserLifecycleAllowed'];
       var canDownload = mcIsAdmin || instance['UserDownloadsAllowed'];
 
-      var detailRow = document.createElement('tr');
-      detailRow.className = 'mcServerDetail hidden';
-      detailRow.innerHTML =
-        '<td colspan="11"><div class="mcDetailInner">' +
+      var toolbarHtml =
         (canLifecycle ?
           '<button class="btn stop">Stop</button>' +
           '<button class="btn start">Start</button>'
@@ -199,8 +196,13 @@ async function renderTable(data) {
         (mcIsAdmin ?
           '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
           '<span class="mcIdleShutdownStatus">Auto-shutdown: ' + (idleStatus.badgeClass ? '<span class="mcBadge ' + idleStatus.badgeClass + '">' + idleStatus.text + '</span>' : idleStatus.text) + '</span>'
-          : '') +
-        '</div>' +
+          : '');
+
+      var detailRow = document.createElement('tr');
+      detailRow.className = 'mcServerDetail hidden';
+      detailRow.innerHTML =
+        '<td colspan="11">' +
+        (toolbarHtml ? '<div class="mcDetailInner">' + toolbarHtml + '</div>' : '') +
         '<div class="mcModsSection"><h4>Mods</h4>' + renderModsList(status && status.mods) + '</div>' +
         '</td>';
 

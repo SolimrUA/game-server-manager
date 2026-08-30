@@ -170,7 +170,7 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-    Default: 'false'
+    Default: 'true'
     Type: String
   GameServerSha256:
     Description: >-

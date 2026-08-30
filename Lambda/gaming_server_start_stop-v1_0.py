@@ -197,7 +197,16 @@ def lambda_handler(event, context): #standard function called on lambda invocati
         s3Key = event.get('s3Key')
         if not targetInstances or not commandId or not s3Key:
             return {"status": "Failed", "error": "Missing commandId/instanceId/s3Key"}
-        return getWorldDownloadStatus(commandId, targetInstances[0]['InstanceId'], s3Key)
+        targetInstance = targetInstances[0]
+        #s3Key is client-supplied and otherwise never cross-checked against instanceId - without this, a
+        #caller with download rights on ANY one game (a valid commandId/instanceId pair of their own to
+        #satisfy the ssm.get_command_invocation lookup below) could substitute a different game's s3Key and
+        #get a presigned URL to a world zip they have no download permission for. Must match exactly what
+        #startWorldDownload() itself constructs the key as.
+        expectedPrefix = 'worlds/'+str(targetInstance.get('GameName'))+'/'+targetInstance['InstanceId']+'-'
+        if not s3Key.startswith(expectedPrefix):
+            return {"status": "Failed", "error": "s3Key does not belong to this instance"}
+        return getWorldDownloadStatus(commandId, targetInstance['InstanceId'], s3Key)
     else:
         statusmessage = "Error - invalid invocation event received"
     return(statusmessage,info)
