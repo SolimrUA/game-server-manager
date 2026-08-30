@@ -26,6 +26,19 @@ async function mcInfo(url, idToken) {
 }
 
 // Maps raw instance State to a badge CSS class
+//GameName (cfn/server-stack.yaml's GameName parameter) is a lowercase-hyphen slug used to name AWS
+//resources - display a human-readable name instead. Unknown/future games fall back to a capitalized
+//version of the slug rather than showing nothing.
+var MC_GAME_DISPLAY_NAMES = {
+  'valheim': 'Valheim',
+  'vintagestory': 'Vintage Story'
+};
+function mcGameDisplayName(gameName) {
+  if (!gameName) return '—';
+  if (MC_GAME_DISPLAY_NAMES[gameName]) return MC_GAME_DISPLAY_NAMES[gameName];
+  return gameName.charAt(0).toUpperCase() + gameName.slice(1);
+}
+
 function mcStateBadgeClass(state) {
   if (state === 'running') return 'running';
   if (state === 'stopped') return 'stopped';
@@ -123,7 +136,7 @@ async function renderTable(data) {
     var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
 
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="10">No gaming server instances found</td></tr>';
+      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="11">No gaming server instances found</td></tr>';
       return;
     }
 
@@ -146,6 +159,7 @@ async function renderTable(data) {
       row.innerHTML =
         '<td><span class="mcChevron">▸</span></td>' +
         '<td><span class="mcDnsDot" data-dns-dot></span>' + dns + '</td>' +
+        '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
         '<td>' + (instance['PublicIpAddress'] || '—') + '</td>' +
         '<td><span class="mcBadge ' + badgeClass + '">' + instance['State'] + '</span></td>' +
         '<td>' + (gameStatus.badgeClass ? '<span class="mcBadge ' + gameStatus.badgeClass + '">' + gameStatus.text + '</span>' : gameStatus.text) + '</td>' +
@@ -163,7 +177,7 @@ async function renderTable(data) {
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
-        '<td colspan="10"><div class="mcDetailInner">' +
+        '<td colspan="11"><div class="mcDetailInner">' +
         (canLifecycle ?
           '<button class="btn stop">Stop</button>' +
           '<button class="btn start">Start</button>'
