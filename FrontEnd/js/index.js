@@ -40,12 +40,26 @@ function mcGameStatus(instance) {
   return { text: 'Starting…', badgeClass: 'pending' };
 }
 
-// LastBackupTime comes from AWS Backup, independent of the instance's own State - the daily backup runs
-// on its own schedule against the EBS data volume regardless of whether the game is running.
-function mcLastBackupText(lastBackupTime) {
-  if (!lastBackupTime) return '—';
-  var diffHours = Math.floor((Date.now() - new Date(lastBackupTime).getTime()) / (1000 * 60 * 60));
-  if (diffHours < 1) return '<1h ago';
+// IdleShutdownStatus: 'disabled' (paused, e.g. for maintenance), 'enabled' (15-min idle check running,
+// hasn't seen an empty check yet), or 'triggered-once' (one empty check already recorded - the *next*
+// empty check will actually stop the instance).
+function mcIdleShutdownStatus(instance) {
+  var status = instance['IdleShutdownStatus'];
+  if (status === 'disabled') return { text: 'Paused', badgeClass: 'stopped' };
+  if (status === 'triggered-once') return { text: 'Active (Idle)', badgeClass: 'pending' };
+  if (status === 'enabled') return { text: 'Active', badgeClass: 'running' };
+  return { text: '—', badgeClass: null };
+}
+
+// Formats "time since a timestamp" - used for both LastBackupTime (AWS Backup's own schedule, independent
+// of the instance's State) and lastSaveTime (the game's own last autosave - a different concept: one is
+// infrastructure-level EBS backup, the other is what the game itself last wrote to its world file).
+function mcRelativeTimeText(timestamp) {
+  if (!timestamp) return '—';
+  var diffMinutes = Math.floor((Date.now() - new Date(timestamp).getTime()) / (1000 * 60));
+  if (diffMinutes < 1) return '<1m ago';
+  if (diffMinutes < 60) return diffMinutes + 'm ago';
+  var diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) return diffHours + 'h ago';
   return Math.floor(diffHours / 24) + 'd ago';
 }
@@ -104,7 +118,7 @@ async function renderTable(data) {
     var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
 
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="9">No gaming server instances found</td></tr>';
+      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="10">No gaming server instances found</td></tr>';
       return;
     }
 
@@ -133,12 +147,16 @@ async function renderTable(data) {
         '<td>' + instance['InstanceType'] + '</td>' +
         '<td>' + playersText + '</td>' +
         '<td>' + versionText + '</td>' +
-        '<td>' + mcLastBackupText(instance['LastBackupTime']) + '</td>';
+        '<td>' + mcRelativeTimeText(status && status.lastSaveTime) + '</td>' +
+        '<td>' + mcRelativeTimeText(instance['LastBackupTime']) + '</td>';
+
+      var idleStatus = mcIdleShutdownStatus(instance);
+      var idlePaused = instance['IdleShutdownStatus'] === 'disabled';
 
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
-        '<td colspan="9"><div class="mcDetailInner">' +
+        '<td colspan="10"><div class="mcDetailInner">' +
         '<button class="btn stop">Stop</button>' +
         '<button class="btn start">Start</button>' +
         '<select class="mcResizeSelect">' +
@@ -151,6 +169,8 @@ async function renderTable(data) {
         '<button class="btn mcBackupNowBtn">Backup Now</button>' +
         '<button class="btn mcDownloadWorldBtn">Download World</button>' +
         '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instance['InstanceId']) + '</span>' +
+        '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
+        '<span class="mcIdleShutdownStatus">Auto-shutdown: ' + (idleStatus.badgeClass ? '<span class="mcBadge ' + idleStatus.badgeClass + '">' + idleStatus.text + '</span>' : idleStatus.text) + '</span>' +
         '</div>' +
         '<div class="mcModsSection"><h4>Mods</h4>' + renderModsList(status && status.mods) + '</div>' +
         '</td>';
@@ -162,6 +182,11 @@ async function renderTable(data) {
       detailRow.querySelector('.primary').onclick = function (e) { e.stopPropagation(); showAlert('Please wait... Resizing your server'); resizeServer(select.value, instanceId); };
       detailRow.querySelector('.mcBackupNowBtn').onclick = function (e) { e.stopPropagation(); showAlert('Starting backup'); backupNow(instanceId); };
       detailRow.querySelector('.mcDownloadWorldBtn').onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
+      detailRow.querySelector('.mcIdleShutdownToggleBtn').onclick = function (e) {
+        e.stopPropagation();
+        if (idlePaused) { showAlert('Resuming auto-shutdown'); resumeIdleShutdown(instanceId); }
+        else { showAlert('Pausing auto-shutdown'); pauseIdleShutdown(instanceId); }
+      };
       var retryLink = detailRow.querySelector('.mcRetryWorldDownloadCheck');
       if (retryLink) retryLink.onclick = function (e) { e.stopPropagation(); retryWorldDownload(instanceId); };
       detailRow.onclick = function (e) { e.stopPropagation(); };
@@ -280,6 +305,34 @@ async function backupNow(instanceId) {
   var jwt = await getJwt();
 
   var msg = await fetch(backupUrl, {
+    method: 'get',
+    headers: new Headers({
+      'Authorization': jwt
+    })
+  });
+
+  var msgdata = await msg.json();
+  showAlert(msgdata[0]);
+
+  for (y=0; y<6; y++){
+    await sleep(1000);
+    mcInfo(API_URL, jwt);
+  }
+}
+
+async function pauseIdleShutdown(instanceId) {
+  await setIdleShutdown("pauseidleshutdown", instanceId);
+}
+
+async function resumeIdleShutdown(instanceId) {
+  await setIdleShutdown("resumeidleshutdown", instanceId);
+}
+
+async function setIdleShutdown(path, instanceId) {
+  var url = API_URL + path + "/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "")
+  var jwt = await getJwt();
+
+  var msg = await fetch(url, {
     method: 'get',
     headers: new Headers({
       'Authorization': jwt

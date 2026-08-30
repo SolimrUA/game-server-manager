@@ -70,6 +70,26 @@ def read_max_players():
         return None
 
 
+def read_last_save_time():
+    #distinct from AWS Backup's LastBackupTime (a separate, infrastructure-level EBS snapshot) - this is
+    #when the game itself last wrote the active world, per serverconfig.json's own WorldConfig.SaveFileLocation
+    try:
+        with open(CONFIG_PATH) as f:
+            config = json.load(f)
+        save_file = config.get("WorldConfig", {}).get("SaveFileLocation")
+        if not save_file:
+            return None
+        #SQLite WAL mode: writes land in the -wal file first and only get checkpointed back into the main
+        #file periodically, so the main file's own mtime can lag real write activity by an unpredictable
+        #amount - check -wal too. -shm's mtime can also be touched by mere read activity, not just writes,
+        #so it's the weakest signal of the three; included anyway since nothing else opens this file today.
+        candidates = [save_file, save_file + "-wal", save_file + "-shm"]
+        mtimes = [os.path.getmtime(p) for p in candidates if os.path.exists(p)]
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(max(mtimes))) if mtimes else None
+    except Exception:
+        return None
+
+
 def read_version():
     try:
         with open(VERSION_FILE) as f:
@@ -134,6 +154,7 @@ def main():
                 "max": read_max_players(),
             },
             "mods": read_mods(),
+            "lastSaveTime": read_last_save_time(),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         comparable = {k: v for k, v in status.items() if k != "updatedAt"}

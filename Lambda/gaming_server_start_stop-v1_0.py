@@ -26,6 +26,8 @@ def lambda_handler(event, context): #standard function called on lambda invocati
     backup = boto3.client('backup')
     global ssm
     ssm = boto3.client('ssm')
+    global events
+    events = boto3.client('events')
     info = getInfo(tagKey, tagValue)
     
     if len(info['Instances']) < 1:
@@ -55,6 +57,15 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             print("start failed")
             statusmessage = "Couldn't start server, please try again later"
             return(statusmessage,info)
+        #the idle-check tag (see IdleShutdownLambda in cfn/server-stack.yaml) persists across a stop/start
+        #cycle since it's just an EC2 tag, not tied to the instance's own lifecycle - if left in place, the
+        #very next automatic idle check after this start would find it still set and immediately re-stop
+        #the instance, treating "first check since restart" as "second consecutive empty check". Clear it
+        #on every start (regardless of what stopped it, or why) so idle-detection always begins fresh.
+        try:
+            ec2.delete_tags(Resources=instanceIds, Tags=[{'Key': 'idle-check'}])
+        except Exception as e:
+            print("Couldn't clear idle-check tag: "+str(e))
         try:
             statemachineresponse = updateDnsStateFunc({'Instances': targetInstances})
             print(statemachineresponse)
@@ -66,7 +77,15 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             ec2.stop_instances(InstanceIds=instanceIds)
             statusmessage = "Stopped server"
         except:
-            statusmessage = "Stopping server failed - please wait a few minutes and try again"  
+            statusmessage = "Stopping server failed - please wait a few minutes and try again"
+            return(statusmessage,info)
+        #same reasoning as the "start" branch above: clear idle-check here too, so a manual stop never
+        #leaves a stale idle-check=true tag behind that would show "Idle - stopping soon" on an
+        #already-stopped instance.
+        try:
+            ec2.delete_tags(Resources=instanceIds, Tags=[{'Key': 'idle-check'}])
+        except Exception as e:
+            print("Couldn't clear idle-check tag: "+str(e))
     elif event['command'] == "getInfo":
             statusmessage = "No action, just getting info"
     elif event['command'] == "reSize":
@@ -115,6 +134,27 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             statusmessage = "Backup started for " + ", ".join(started) + ", but failed for " + ", ".join(failed)
         else:
             statusmessage = "Couldn't start backup, please try again later"
+    elif event['command'] == "pauseIdleShutdown" or event['command'] == "resumeIdleShutdown":
+        #pauses/resumes the per-server idle-detection schedule (see IdleCheckSchedule in
+        #cfn/server-stack.yaml) - e.g. for maintenance, where you want the instance to stay up regardless
+        #of player count. Doesn't affect the manual Stop button or the AWS Backup schedule, only this.
+        pausing = event['command'] == "pauseIdleShutdown"
+        done = []
+        for i in targetInstances:
+            gameName = i.get('GameName')
+            if not gameName:
+                continue
+            try:
+                ruleName = 'game-server-'+gameName+'-cfn-idle-check'
+                if pausing:
+                    events.disable_rule(Name=ruleName)
+                else:
+                    events.enable_rule(Name=ruleName)
+                done.append(gameName)
+            except Exception as e:
+                print(event['command']+" failed for "+str(gameName)+": "+str(e))
+        verb = "paused" if pausing else "resumed"
+        statusmessage = "Auto-shutdown "+verb+" for " + ", ".join(done) if done else "Couldn't "+("pause" if pausing else "resume")+" auto-shutdown, please try again later"
     elif event['command'] == "startWorldDownload":
         #returns a different shape than the other commands (no [statusmessage, info] tuple) - the front
         #end handles this one specially, polling getWorldDownloadStatus rather than showing an alert
@@ -175,6 +215,7 @@ def getInfo(tagKey, tagValue):
                 #independent of instance State - AWS Backup runs on its own daily schedule against the
                 #EBS data volume regardless of whether the instance itself is stopped
                 infoDict['LastBackupTime'] = getLastBackupTime(gameName)
+                infoDict['IdleShutdownStatus'] = getIdleShutdownStatus(gameName, instance.get('Tags', []))
                 info["Instances"].append(infoDict)
     return(info)
 
@@ -203,6 +244,24 @@ def getLastBackupTime(gameName):
     except Exception as e:
         print("No backup info available for "+str(gameName)+": "+str(e))
         return None
+
+def getIdleShutdownStatus(gameName, tags):
+    #Three states, not just enabled/disabled: "disabled" (paused, e.g. for maintenance), "enabled" (the
+    #15-min schedule is running and hasn't seen an idle check yet), or "triggered-once" (one empty check
+    #already recorded via the idle-check tag - see IdleShutdownLambda in cfn/server-stack.yaml - so the
+    #*next* empty check will actually stop the instance). The tag data is already in hand from getInfo()'s
+    #own describe_instances call - only the rule's enabled/disabled state needs a fresh lookup.
+    if not gameName:
+        return None
+    try:
+        ruleState = events.describe_rule(Name='game-server-'+gameName+'-cfn-idle-check')['State']
+    except Exception as e:
+        print("No idle-shutdown rule info available for "+str(gameName)+": "+str(e))
+        return None
+    if ruleState != 'ENABLED':
+        return 'disabled'
+    wasIdle = any(t.get('Key') == 'idle-check' and t.get('Value') == 'true' for t in tags)
+    return 'triggered-once' if wasIdle else 'enabled'
 
 def startBackupNow(gameName, accountId):
     #Same call already proven manually: back up the data volume specifically (not the whole instance) -

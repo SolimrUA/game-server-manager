@@ -30,8 +30,6 @@ Metadata:
           - KeyName
           - HostedZoneId
           - Domain
-          - ShutdownTimeHours
-          - ShutdownTimeMins
           - IdTagValue
           - CreateInstance
       - Label:
@@ -72,10 +70,6 @@ Metadata:
         default: Tag name that will be used to identify your gaming server(s). Must match the value used on your Control Panel stack.
       IdTagValue:
         default: Tag value that will be used to identify your gaming server(s). Must match the value used on your Control Panel stack.
-      ShutdownTimeHours:
-        default: The time of day to shutdown the server automatically in hours (NOTE GMT/UTC TIME!! - not local time zone)
-      ShutdownTimeMins:
-        default: The minutes past the hours specfied above to automatically shut down your server
       LatestAMIIDx86:
         default: The AMI to use. This is the machine image and includes at a minimum the OS for the server
       GamingTCPTrafficPortStart:
@@ -249,60 +243,7 @@ Parameters:
     Type: String
     Default: game-server
     ConstraintDescription: This is a mandatory field - you must pust something in.  We recommend not changing the default value.
-  ShutdownTimeHours:
-    Description: Setting a time here will automatically stop your server at the same time every day.  You adjust the rule, add rules, changes days etc. later directly in the AWS EventBridge Console.  IMPORTANT NOTE - the time must be set in GMT not your local time zone (also note therefore this time will appear to change when going from summer time to winter for relevant time zones).  Leaving blank will not set an auto server shut down rule.
-    Type: String
-    AllowedValues:
-      - 'None - do not auto shut-down'
-      - '23'
-      - '22'
-      - '21'
-      - '20'
-      - '19'
-      - '18'
-      - '17'
-      - '16'
-      - '15'
-      - '14'
-      - '13'
-      - '12'
-      - '11'
-      - '10'
-      - '9'
-      - '8'
-      - '7'
-      - '6'
-      - '5'
-      - '4'
-      - '3'
-      - '2'
-      - '1'
-      - '0'
-  ShutdownTimeMins:
-    Description: Minutes past the hours to auto shut down your server each day
-    Type: String
-    AllowedValues:
-      - 'Not Applicable'
-      - '0'
-      - '5'
-      - '10'
-      - '15'
-      - '20'
-      - '25'
-      - '30'
-      - '35'
-      - '40'
-      - '45'
-      - '50'
-      - '55'
-
 Conditions:
-  ShutdownTimeHoursIsNull: !Equals
-    - !Ref ShutdownTimeHours
-    - 'None - do not auto shut-down'
-  ShutdownTimeMinsIsNull: !Equals
-    - !Ref ShutdownTimeMins
-    - 'None'
   noSecIngress: !And
     - !Condition hasTCP
     - !Condition hasUDP
@@ -367,7 +308,7 @@ Resources:
             apt upgrade -y
             apt install -y python3-pip
             pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
-            trap 'cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}; shutdown -h +2' EXIT
+            trap 'cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}' EXIT
             #on the root disk, not /tmp: /tmp is cleared on every reboot (this AMI mounts it as tmpfs), but
             #status_agent.py re-reads these two values every time it (re)starts, including after every
             #stop/start cycle - and this instance always goes through at least one, since it auto-shuts-down
@@ -704,7 +645,7 @@ Resources:
       ToPort: 22
       CidrIp: !GetAtt GetInstanceConnectIps.srcip
 
-  BedTimeStopLambdaIamRole:
+  IdleShutdownLambdaIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
       AssumeRolePolicyDocument:
@@ -714,10 +655,10 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: 'sts:AssumeRole'
-      Description: Execution role for the per-server auto-shutdown lambda
+      Description: Execution role for the per-server idle-detection auto-shutdown lambda
       Path: /service-role/
       Policies:
-        - PolicyName: bed-time-stop-inline
+        - PolicyName: idle-shutdown-inline
           PolicyDocument:
             !Sub
               - |
@@ -740,72 +681,93 @@ Resources:
                       },
                       {
                         "Effect": "Allow",
-                        "Action": "ec2:StopInstances",
+                        "Action": [
+                          "ec2:StopInstances",
+                          "ec2:CreateTags",
+                          "ec2:DeleteTags"
+                        ],
                         "Resource": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*",
                         "Condition": {
                           "StringEquals": {
                             "ec2:ResourceTag/game-name": "${gameName}"
                           }
                         }
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": "s3:GetObject",
+                        "Resource": "arn:aws:s3:::${statusBucketName}/status/${gameName}.json"
                       }
                     ]
                   }
               - gameName: !Ref GameName
+                statusBucketName: !ImportValue common-infra-status-bucket-name
 
-  BedTimeStopLambda:
+  IdleShutdownLambda:
     Type: AWS::Lambda::Function
     Properties:
       Code:
         ZipFile: |
           import boto3
+          import json
           def lambda_handler(event, context):
               ec2 = boto3.client('ec2')
+              s3 = boto3.client('s3')
+              gameName = event['gameName']
               response = ec2.describe_instances(Filters=[
-                  {'Name': 'tag:game-name', 'Values': [event['gameName']]},
+                  {'Name': 'tag:game-name', 'Values': [gameName]},
                   {'Name': 'instance-state-name', 'Values': ['running']},
               ])
-              instance_ids = [i['InstanceId'] for r in response['Reservations'] for i in r['Instances']]
-              if instance_ids:
-                  ec2.stop_instances(InstanceIds=instance_ids)
-      Description: Stops this stack's own EC2 instance (found by its game-name tag) on the daily auto-shutdown schedule
+              for reservation in response['Reservations']:
+                  for instance in reservation['Instances']:
+                      instanceId = instance['InstanceId']
+                      wasIdle = any(t['Key'] == 'idle-check' and t['Value'] == 'true' for t in instance.get('Tags', []))
+                      try:
+                          obj = s3.get_object(Bucket=event['statusBucket'], Key='status/'+gameName+'.json')
+                          currentPlayers = json.loads(obj['Body'].read()).get('players', {}).get('current')
+                      except Exception:
+                          continue #no status reported yet (fresh install, or a game with no status agent) - can't tell if it's idle, leave it alone
+                      isIdleNow = not currentPlayers #covers both 0 players and "can't determine" (e.g. game not running)
+                      if isIdleNow and wasIdle:
+                          ec2.stop_instances(InstanceIds=[instanceId])
+                          #clear the tag on the stop itself, not just on the next start - otherwise a
+                          #stopped instance still carries idle-check=true and the control panel shows
+                          #"Idle - stopping soon" for a server that's already stopped.
+                          ec2.delete_tags(Resources=[instanceId], Tags=[{'Key': 'idle-check', 'Value': 'true'}])
+                      elif isIdleNow:
+                          ec2.create_tags(Resources=[instanceId], Tags=[{'Key': 'idle-check', 'Value': 'true'}])
+                      elif wasIdle:
+                          ec2.delete_tags(Resources=[instanceId], Tags=[{'Key': 'idle-check', 'Value': 'true'}])
+      Description: Stops this stack's own EC2 instance (found by its game-name tag) once it's had no players for two consecutive 15-minute checks
       Handler: index.lambda_handler
-      Role: !GetAtt BedTimeStopLambdaIamRole.Arn
+      Role: !GetAtt IdleShutdownLambdaIamRole.Arn
       Runtime: python3.8
       Timeout: 10
 
-  BedTime:
+  IdleCheckSchedule:
     Type: AWS::Events::Rule
     Properties:
-      Description: Rule to shutdown server at certain time every day
-      ScheduleExpression: !Join
-        - ''
-        - - 'cron('
-          - !If
-            - ShutdownTimeHoursIsNull
-            - '0'
-            - !Ref ShutdownTimeMins
-          - ' '
-          - !If
-            - ShutdownTimeHoursIsNull
-            - '0'
-            - !Ref ShutdownTimeHours
-          - ' * * ? *)'
-      State: !If
-        - ShutdownTimeHoursIsNull
-        - DISABLED
-        - ENABLED
+      #deterministic name (not CFN-generated) so the Control Panel's Lambda - in a different stack, with no
+      #way to !GetAtt this rule - can address it by name to pause/resume/check it, same pattern already
+      #used for BackupIamRole's RoleName.
+      Name: !Sub "${AWS::StackName}-idle-check"
+      Description: Checks every 15 minutes whether this server has had no players for two consecutive checks, and stops it if so
+      ScheduleExpression: rate(15 minutes)
+      State: ENABLED
       Targets:
-        -   Arn: !GetAtt BedTimeStopLambda.Arn
-            Id: BedTimeStopLambdaFunction
-            Input: !Sub '{"gameName": "${GameName}"}'
+        -   Arn: !GetAtt IdleShutdownLambda.Arn
+            Id: IdleShutdownLambdaFunction
+            Input: !Sub
+              - '{"gameName": "${GameName}", "statusBucket": "${bucket}"}'
+              - bucket: !ImportValue common-infra-status-bucket-name
 
-  BedTimeLambdaPermission:
+  IdleShutdownLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref BedTimeStopLambda
+      FunctionName: !Ref IdleShutdownLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
-      SourceArn: !GetAtt BedTime.Arn
+      SourceArn: !GetAtt IdleCheckSchedule.Arn
 
 Outputs:
   PublicIp:

@@ -125,9 +125,9 @@ Resources:
   #to the "prod" stage on its own - CloudFormation only republishes when this resource is actually
   #replaced (changing a property like Description isn't enough - it just patches the existing deployment's
   #metadata in place, still serving the stale snapshot). The reliable way to force a genuinely new
-  #deployment is bumping THIS RESOURCE'S OWN LOGICAL ID (currently Rev5) - that makes CloudFormation create
+  #deployment is bumping THIS RESOURCE'S OWN LOGICAL ID (currently Rev6) - that makes CloudFormation create
   #a new resource rather than update the existing one. Next endpoint change: rename this to
-  #ControlApiDeploymentRev6, and so on, AND add its GET method to DependsOn below.
+  #ControlApiDeploymentRev7, and so on, AND add its GET method to DependsOn below.
   #
   #Second bug, found after the first "fix": DependsOn previously listed only ApiGetInfoGetMethod. With no
   #dependency on the OTHER GET methods, CloudFormation has no guarantee it finishes creating them before
@@ -139,7 +139,8 @@ Resources:
   #Rev5: renamed the backup-trigger endpoint back from saveworld to backupnow (see git history) - a path
   #rename is exactly the kind of change that needs this bump, same as adding a new endpoint does; renaming
   #a DependsOn entry's VALUE alone does not make CloudFormation replace this resource on its own.
-  ControlApiDeploymentRev5:
+  #Rev6: added pauseidleshutdown/resumeidleshutdown.
+  ControlApiDeploymentRev6:
     DependsOn:
       - ApiGetInfoGetMethod
       - ApiStartGetMethod
@@ -148,6 +149,8 @@ Resources:
       - ApiBackupNowGetMethod
       - ApiDownloadWorldStartGetMethod
       - ApiDownloadWorldStatusGetMethod
+      - ApiPauseIdleShutdownGetMethod
+      - ApiResumeIdleShutdownGetMethod
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
       RestApiId: !Ref ControlApi
@@ -188,6 +191,24 @@ Resources:
         - ControlApi
         - RootResourceId
       PathPart: stop
+      RestApiId: !Ref ControlApi
+
+  ControlApiResPauseIdleShutdown:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: pauseidleshutdown
+      RestApiId: !Ref ControlApi
+
+  ControlApiResResumeIdleShutdown:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: resumeidleshutdown
       RestApiId: !Ref ControlApi
 
   ControlApiResBackupNow:
@@ -570,6 +591,148 @@ Resources:
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: BackupNowOPTIONS
       ResourceId: !Ref ControlApiResBackupNow
+      RestApiId: !Ref ControlApi
+
+  ApiPauseIdleShutdownGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"pauseIdleShutdown\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: PauseIdleShutdown
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+      ResourceId: !Ref ControlApiResPauseIdleShutdown
+      RestApiId: !Ref ControlApi
+
+  ApiPauseIdleShutdownOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: PauseIdleShutdownOPTIONS
+      ResourceId: !Ref ControlApiResPauseIdleShutdown
+      RestApiId: !Ref ControlApi
+
+  ApiResumeIdleShutdownGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"resumeIdleShutdown\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: ResumeIdleShutdown
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+      ResourceId: !Ref ControlApiResResumeIdleShutdown
+      RestApiId: !Ref ControlApi
+
+  ApiResumeIdleShutdownOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: ResumeIdleShutdownOPTIONS
+      ResourceId: !Ref ControlApiResResumeIdleShutdown
       RestApiId: !Ref ControlApi
 
   ApiDownloadWorldStartGetMethod:
@@ -1033,7 +1196,8 @@ Resources:
                         "Action":[
                           "ec2:StartInstances",
                           "ec2:ModifyInstanceAttribute",
-                          "ec2:StopInstances"
+                          "ec2:StopInstances",
+                          "ec2:DeleteTags"
                           ],
                         "Resource": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*",
                         "Condition": {
@@ -1090,6 +1254,11 @@ Resources:
                         "Effect": "Allow",
                         "Action": "ssm:GetCommandInvocation",
                         "Resource": "*"
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": ["events:DescribeRule", "events:EnableRule", "events:DisableRule"],
+                        "Resource": "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/game-server-*-cfn-idle-check"
                       }
                     ]
                   }
@@ -1442,6 +1611,22 @@ Resources:
       FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/backupnow
+
+  StartStopLambdaPermissionPauseIdleShutdown:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/pauseidleshutdown
+
+  StartStopLambdaPermissionResumeIdleShutdown:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/resumeidleshutdown
 
   StartStopLambdaPermissionDownloadWorldStart:
     Type: AWS::Lambda::Permission

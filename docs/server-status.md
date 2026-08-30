@@ -58,6 +58,7 @@ to S3 directly.
     { "name": "primitivesurvival", "version": "3.5.0" },
     { "name": "wildcraft", "version": null }
   ],
+  "lastSaveTime": "2026-08-15T12:30:00Z",
   "updatedAt": "2026-08-15T12:34:56Z"
 }
 ```
@@ -73,6 +74,11 @@ to S3 directly.
 - `players.current` / `players.max` - integers. `max` may be `null` if the agent couldn't determine it.
 - `mods` - array of `{name, version}`. `version` is `null` when it couldn't be determined (e.g. a mod without a
   parseable manifest). Empty array if the game has no mod support or none are installed.
+- `lastSaveTime` - UTC ISO-8601 timestamp of when the game itself last wrote its world data (Vintage Story: the
+  mtime of the active save file, per `serverconfig.json`'s own `WorldConfig.SaveFileLocation`). Deliberately
+  distinct from the Control Panel's "Last Backup" column (`LastBackupTime`, from AWS Backup's own scheduled EBS
+  snapshot) - one is a genuine autosave the game itself performed, the other is unrelated infrastructure-level
+  backup, and conflating the two was a real point of confusion earlier in this project.
 - `updatedAt` - UTC ISO-8601 timestamp of when the agent last computed this snapshot (not necessarily when it was
   last *pushed*, since unchanged snapshots aren't re-uploaded).
 
