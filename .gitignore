@@ -2,3 +2,4 @@ build/
 CdkAssetPublisher/cdk.out/
 CdkAssetPublisher/.env
 CdkAssetPublisher/cdk-asset-publisher
+*.pyc

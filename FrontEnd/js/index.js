@@ -1,6 +1,11 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
+//Whether the signed-in Cognito user is in the "admins" group - fetched once in init() from the ID
+//token's own cognito:groups claim. This only drives which buttons render; the Lambda re-checks
+//independently and is the real security boundary (see gaming_server_start_stop-v1_0.py).
+var mcIsAdmin = false;
+
 // Defining async function taking in JWT and URL
 async function mcInfo(url, idToken) {
 
@@ -152,37 +157,53 @@ async function renderTable(data) {
 
       var idleStatus = mcIdleShutdownStatus(instance);
       var idlePaused = instance['IdleShutdownStatus'] === 'disabled';
+      var canLifecycle = mcIsAdmin || instance['UserLifecycleAllowed'];
+      var canDownload = mcIsAdmin || instance['UserDownloadsAllowed'];
 
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
         '<td colspan="10"><div class="mcDetailInner">' +
-        '<button class="btn stop">Stop</button>' +
-        '<button class="btn start">Start</button>' +
-        '<select class="mcResizeSelect">' +
-        '<option value="micro">Micro</option>' +
-        '<option value="small">Small</option>' +
-        '<option value="medium">Medium</option>' +
-        '<option value="large">Large</option>' +
-        '</select>' +
-        '<button class="btn primary">Resize</button>' +
-        '<button class="btn mcBackupNowBtn">Backup Now</button>' +
-        '<button class="btn mcDownloadWorldBtn">Download World</button>' +
-        '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instance['InstanceId']) + '</span>' +
-        '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
-        '<span class="mcIdleShutdownStatus">Auto-shutdown: ' + (idleStatus.badgeClass ? '<span class="mcBadge ' + idleStatus.badgeClass + '">' + idleStatus.text + '</span>' : idleStatus.text) + '</span>' +
+        (canLifecycle ?
+          '<button class="btn stop">Stop</button>' +
+          '<button class="btn start">Start</button>'
+          : '') +
+        (mcIsAdmin ?
+          '<select class="mcResizeSelect">' +
+          '<option value="micro">Micro</option>' +
+          '<option value="small">Small</option>' +
+          '<option value="medium">Medium</option>' +
+          '<option value="large">Large</option>' +
+          '</select>' +
+          '<button class="btn primary">Resize</button>' +
+          '<button class="btn mcBackupNowBtn">Backup Now</button>'
+          : '') +
+        (canDownload ?
+          '<button class="btn mcDownloadWorldBtn">Download World</button>' +
+          '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instance['InstanceId']) + '</span>'
+          : '') +
+        (mcIsAdmin ?
+          '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
+          '<span class="mcIdleShutdownStatus">Auto-shutdown: ' + (idleStatus.badgeClass ? '<span class="mcBadge ' + idleStatus.badgeClass + '">' + idleStatus.text + '</span>' : idleStatus.text) + '</span>'
+          : '') +
         '</div>' +
         '<div class="mcModsSection"><h4>Mods</h4>' + renderModsList(status && status.mods) + '</div>' +
         '</td>';
 
       var instanceId = instance['InstanceId'];
       var select = detailRow.querySelector('select');
-      detailRow.querySelector('.stop').onclick = function (e) { e.stopPropagation(); showAlert('Stopping the Server'); stopServer(instanceId); };
-      detailRow.querySelector('.start').onclick = function (e) { e.stopPropagation(); showAlert('Starting the Server'); startServer(instanceId); };
-      detailRow.querySelector('.primary').onclick = function (e) { e.stopPropagation(); showAlert('Please wait... Resizing your server'); resizeServer(select.value, instanceId); };
-      detailRow.querySelector('.mcBackupNowBtn').onclick = function (e) { e.stopPropagation(); showAlert('Starting backup'); backupNow(instanceId); };
-      detailRow.querySelector('.mcDownloadWorldBtn').onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
-      detailRow.querySelector('.mcIdleShutdownToggleBtn').onclick = function (e) {
+      var stopBtn = detailRow.querySelector('.stop');
+      var startBtn = detailRow.querySelector('.start');
+      var resizeBtn = detailRow.querySelector('.primary');
+      var backupBtn = detailRow.querySelector('.mcBackupNowBtn');
+      var downloadBtn = detailRow.querySelector('.mcDownloadWorldBtn');
+      var idleToggleBtn = detailRow.querySelector('.mcIdleShutdownToggleBtn');
+      if (stopBtn) stopBtn.onclick = function (e) { e.stopPropagation(); showAlert('Stopping the Server'); stopServer(instanceId); };
+      if (startBtn) startBtn.onclick = function (e) { e.stopPropagation(); showAlert('Starting the Server'); startServer(instanceId); };
+      if (resizeBtn) resizeBtn.onclick = function (e) { e.stopPropagation(); showAlert('Please wait... Resizing your server'); resizeServer(select.value, instanceId); };
+      if (backupBtn) backupBtn.onclick = function (e) { e.stopPropagation(); showAlert('Starting backup'); backupNow(instanceId); };
+      if (downloadBtn) downloadBtn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
+      if (idleToggleBtn) idleToggleBtn.onclick = function (e) {
         e.stopPropagation();
         if (idlePaused) { showAlert('Resuming auto-shutdown'); resumeIdleShutdown(instanceId); }
         else { showAlert('Pausing auto-shutdown'); pauseIdleShutdown(instanceId); }
@@ -459,9 +480,21 @@ async function init() {
 
   await authIfNeeded();
   await updateAuthButtons();
+  await loadIsAdmin();
 
   refreshData();
   setInterval(refreshData, 5000);
+
+  async function loadIsAdmin() {
+    try {
+      const session = await Auth.currentSession();
+      const groups = session.getIdToken().payload['cognito:groups'] || [];
+      mcIsAdmin = groups.indexOf('admins') !== -1;
+    } catch (e) {
+      console.log(e);
+      mcIsAdmin = false;
+    }
+  }
 
   async function authIfNeeded() {
     try {     

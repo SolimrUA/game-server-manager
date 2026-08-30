@@ -47,7 +47,28 @@ def lambda_handler(event, context): #standard function called on lambda invocati
     for i in targetInstances:
         foundInstanceId = i['InstanceId']
         instanceIds.append(foundInstanceId)
-        
+
+    #Two-tier access control: "admins" can do everything below; "users" are limited to Start/Stop and
+    #Download World, and only for games whose server-stack.yaml opted in via AllowUserLifecycle/
+    #AllowUserDownloads (see UserLifecycleAllowed/UserDownloadsAllowed in getInfo() above). The caller's
+    #Cognito groups arrive here as a plain string via API Gateway's VTL request template
+    #($context.authorizer.claims.get('cognito:groups')) - API Gateway has historically rendered a
+    #multi-valued claim like this as "[admins, users]" rather than valid JSON, so strip any brackets
+    #before splitting rather than assuming a clean comma list.
+    groups = [g.strip() for g in (event.get('groups') or '').strip('[]').split(',') if g.strip()]
+    isAdmin = 'admins' in groups
+    command = event['command']
+    if not isAdmin:
+        if command in ("start", "stop"):
+            permitted = targetInstanceId and any(i['InstanceId'] == targetInstanceId and i.get('UserLifecycleAllowed') for i in targetInstances)
+            if not permitted:
+                return ("You don't have permission to start/stop this server", info)
+        elif command in ("startWorldDownload", "getWorldDownloadStatus"):
+            permitted = targetInstanceId and any(i['InstanceId'] == targetInstanceId and i.get('UserDownloadsAllowed') for i in targetInstances)
+            if not permitted:
+                return ("You don't have permission to download this server's world", info)
+        elif command != "getInfo":
+            return ("You don't have permission to perform this action", info)
 
     if event['command'] == "start":
         try:
@@ -216,6 +237,12 @@ def getInfo(tagKey, tagValue):
                 #EBS data volume regardless of whether the instance itself is stopped
                 infoDict['LastBackupTime'] = getLastBackupTime(gameName)
                 infoDict['IdleShutdownStatus'] = getIdleShutdownStatus(gameName, instance.get('Tags', []))
+                #per-game toggles (cfn/server-stack.yaml's AllowUserLifecycle/AllowUserDownloads) for
+                #whether the "users" Cognito group - not just "admins" - may Start/Stop or Download World
+                #for this specific game. Resolved here from the instance's own tags so both the
+                #authorization check below and the front-end's button visibility read the same values.
+                infoDict['UserLifecycleAllowed'] = next((i.get('Value') == 'true' for i in instance['Tags'] if i.get('Key') == 'user-lifecycle-allowed'), False)
+                infoDict['UserDownloadsAllowed'] = next((i.get('Value') == 'true' for i in instance['Tags'] if i.get('Key') == 'user-downloads-allowed'), False)
                 info["Instances"].append(infoDict)
     return(info)
 

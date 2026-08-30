@@ -140,7 +140,10 @@ Resources:
   #rename is exactly the kind of change that needs this bump, same as adding a new endpoint does; renaming
   #a DependsOn entry's VALUE alone does not make CloudFormation replace this resource on its own.
   #Rev6: added pauseidleshutdown/resumeidleshutdown.
-  ControlApiDeploymentRev6:
+  #Rev7: added the cognito:groups claim passthrough (two-tier admin/users access control) to every GET
+  #method's RequestTemplates - no new endpoints, but changing an existing method's Integration still needs
+  #this bump per the rule above.
+  ControlApiDeploymentRev7:
     DependsOn:
       - ApiGetInfoGetMethod
       - ApiStartGetMethod
@@ -255,7 +258,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"getInfo\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\"\r\n}"
+            application/json : "{\r\n \"command\": \"getInfo\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -325,7 +328,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"start\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"start\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -396,7 +399,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"stop\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"stop\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -467,7 +470,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"reSize\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"reSizeType\": \"$input.params('resize')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"reSize\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"reSizeType\": \"$input.params('resize')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -539,7 +542,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"backupNow\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"backupNow\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -610,7 +613,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"pauseIdleShutdown\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"pauseIdleShutdown\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -681,7 +684,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"resumeIdleShutdown\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"resumeIdleShutdown\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -752,7 +755,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"startWorldDownload\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\"\r\n}"
+            application/json : "{\r\n \"command\": \"startWorldDownload\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -823,7 +826,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"getWorldDownloadStatus\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"commandId\": \"$input.params('commandid')\",\r\n \"s3Key\": \"$input.params('s3key')\"\r\n}"
+            application/json : "{\r\n \"command\": \"getWorldDownloadStatus\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"commandId\": \"$input.params('commandid')\",\r\n \"s3Key\": \"$input.params('s3key')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -937,6 +940,22 @@ Resources:
         - email
       UsernameConfiguration:
           CaseSensitive: false
+
+  CognitoAdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      UserPoolId: !Ref CognitoUserPool
+      Description: Full access to every Control Panel action, for every game.
+
+  CognitoUsersGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: users
+      UserPoolId: !Ref CognitoUserPool
+      Description: >-
+        Limited to Start/Stop and Download World, and only for games whose server-stack.yaml opted in via
+        AllowUserLifecycle/AllowUserDownloads. See StartStopLambda's authorization check.
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
