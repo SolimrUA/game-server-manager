@@ -142,6 +142,25 @@ if [ ! -f "$MOUNT_POINT/serverconfig.json" ]; then
     "$MOUNT_POINT/serverconfig.json" | sudo -u vintagestory tee /tmp/serverconfig.json.tmp > /dev/null
   sudo -u vintagestory mv /tmp/serverconfig.json.tmp "$MOUNT_POINT/serverconfig.json"
 fi
+
+#`systemctl enable` alone only arranges for these to start on a FUTURE boot - it doesn't retroactively
+#start them now just because multi-user.target was already reached earlier in this same boot (which it
+#was, well before this device-triggered script got a chance to run and enable them). Every install used to
+#get away without this because the instance auto-shut-down ~2 minutes after install and got manually
+#restarted from the control panel - a genuine second boot, by which point these units already existed and
+#WantedBy=multi-user.target correctly picked them up. Removing that auto-shutdown (idle-shutdown redesign)
+#silently exposed this - confirmed live on Valheim's equivalent services: a fresh install left them
+#"enabled" but "inactive (dead)" indefinitely. Starting them explicitly here, once the data they depend on
+#is actually ready, is what makes a fresh install actually come up working without needing a reboot or
+#manual nudge.
+#
+#--no-block is required, not optional: vintagestory.service has After=vintagestory-data.service, and this
+#script IS vintagestory-data.service's own ExecStart - a plain (blocking) `systemctl start` here waits for
+#vintagestory.service's ordering dependency on vintagestory-data.service to clear, which can't happen until
+#THIS script returns. Confirmed live on Valheim's equivalent unit: without --no-block, the calling service
+#hangs in "activating" forever, deadlocked against itself.
+systemctl start --no-block vintagestory.service
+systemctl start --no-block vintagestory-status-agent.service
 PREPARE_SCRIPT
 sudo chmod +x /usr/local/bin/vintagestory-prepare-data.sh
 

@@ -20,10 +20,15 @@ A per-game "status agent" process, installed by that game's cartridge script (e.
 [`status_agent.py`](../scripts/VintageStory/status_agent.py) from alongside itself and runs it as a systemd service),
 running alongside the actual game server. It re-checks state on a short interval and only re-uploads the JSON when
 something actually changed, to keep S3 costs and API calls minimal. What "re-checks state" means is inherently
-game-specific - Vintage Story's agent asks the game process directly (via its console, see below) rather than
-guessing from logs, since that's what the game's own tooling does too.
+game-specific:
 
-## Sending the game server console commands
+- Vintage Story's agent asks the game process directly via its console (see below), since that's what the game's
+  own tooling does too.
+- Valheim's agent ([`scripts/Valheim/status_agent.py`](../scripts/Valheim/status_agent.py)) shells into the game's
+  docker container (`docker compose exec valheim odin status --json`), since Odin (the `mbround18/valheim` image's
+  own launcher) already exposes player count/version/mods this way - no console/log-scraping needed.
+
+## Sending the Vintage Story server console commands
 
 Vintage Story has no network API - the only way to control a running server is through its console, and the only
 way to reach that console on a headless box is `server.sh`'s `command` action. `server.sh` is the game's own
@@ -87,8 +92,11 @@ data rather than erroring.
 
 ## Adding status reporting for another game
 
+Vintage Story and Valheim are two working examples of this pattern with different "re-check state" mechanisms (game
+console vs. shelling into a docker container) - see [Who writes it](#who-writes-it) above. For a third game:
+
 1. Put the game's cartridge script in its own folder under `scripts/` (e.g. `scripts/VintageStory/`) alongside a status
-   agent script, following the same split used for Vintage Story. The server stack invokes the cartridge script as
+   agent script, following the same split used for Vintage Story and Valheim. The server stack invokes the cartridge script as
    `./install.sh "$GameServer"`, so `$1` is the script's own source URL - use it to fetch sibling files (like the
    status agent) from wherever `install.sh` itself was served from. In practice this is always your S3-published
    copy (see the root README) - `GameServer` has no default and CloudFormation never fetches from GitHub.

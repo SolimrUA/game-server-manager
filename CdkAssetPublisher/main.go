@@ -38,7 +38,8 @@ type LambdaKeys struct {
 // EC2 instance. Server stacks take these as parameters and verify a script matches before ever running
 // it, so a compromised bucket can't get anything executed that wasn't approved at deploy time.
 type ScriptHashes struct {
-	ValheimSha256                 string
+	ValheimInstallSha256          string
+	ValheimStatusAgentSha256      string
 	VintageStoryInstallSha256     string
 	VintageStoryStatusAgentSha256 string
 }
@@ -92,7 +93,7 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	// These are the values to pass as --parameter-overrides to `aws cloudformation deploy` for
 	// cfn/control-panel.yaml (AssetsBucketName/AssetsKeyPrefix/StartStopLambdaKey/UpdateDnsLambdaKey) and
 	// cfn/server-stack.yaml (GameServer, composed as ScriptsBaseUrl + "/<script>", e.g.
-	// ScriptsBaseUrl + "/valheim.sh"). See the root README.
+	// ScriptsBaseUrl + "/Valheim/install.sh"). See the root README.
 	awscdk.NewCfnOutput(stack, jsii.String("AssetBucketName"), &awscdk.CfnOutputProps{
 		Value: jsii.String(config.AssetBucketName),
 	})
@@ -108,8 +109,11 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	awscdk.NewCfnOutput(stack, jsii.String("UpdateDnsLambdaKey"), &awscdk.CfnOutputProps{
 		Value: jsii.String(lambdaKeys.UpdateDnsLambdaKey),
 	})
-	awscdk.NewCfnOutput(stack, jsii.String("ValheimSha256"), &awscdk.CfnOutputProps{
-		Value: jsii.String(scriptHashes.ValheimSha256),
+	awscdk.NewCfnOutput(stack, jsii.String("ValheimInstallSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.ValheimInstallSha256),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("ValheimStatusAgentSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.ValheimStatusAgentSha256),
 	})
 	awscdk.NewCfnOutput(stack, jsii.String("VintageStoryInstallSha256"), &awscdk.CfnOutputProps{
 		Value: jsii.String(scriptHashes.VintageStoryInstallSha256),
@@ -168,7 +172,11 @@ func prepareAssets(config Config) (LambdaKeys, ScriptHashes, error) {
 		return LambdaKeys{}, ScriptHashes{}, err
 	}
 
-	valheimHash, err := sha256File("../scripts/valheim.sh")
+	valheimInstallHash, err := sha256File("../scripts/Valheim/install.sh")
+	if err != nil {
+		return LambdaKeys{}, ScriptHashes{}, err
+	}
+	valheimStatusAgentHash, err := sha256File("../scripts/Valheim/status_agent.py")
 	if err != nil {
 		return LambdaKeys{}, ScriptHashes{}, err
 	}
@@ -183,7 +191,8 @@ func prepareAssets(config Config) (LambdaKeys, ScriptHashes, error) {
 
 	return LambdaKeys{StartStopLambdaKey: startStopKey, UpdateDnsLambdaKey: updateDnsKey},
 		ScriptHashes{
-			ValheimSha256:                 valheimHash,
+			ValheimInstallSha256:          valheimInstallHash,
+			ValheimStatusAgentSha256:      valheimStatusAgentHash,
 			VintageStoryInstallSha256:     vsInstallHash,
 			VintageStoryStatusAgentSha256: vsStatusAgentHash,
 		}, nil
