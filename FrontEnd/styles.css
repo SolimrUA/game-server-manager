@@ -192,6 +192,15 @@ main {
     background: var(--cyan-dark);
 }
 
+.btn:disabled,
+.btn.disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    background: var(--white);
+    color: var(--grey-3);
+    border-color: var(--grey-2);
+}
+
 select.mcResizeSelect {
     border: 1px solid var(--grey-2);
     border-radius: 6px;
@@ -219,6 +228,10 @@ table.mcServerTable thead th {
     background: var(--grey-1);
 }
 
+table.mcServerTable thead th.mcActionsHeader {
+    text-align: center;
+}
+
 table.mcServerTable tbody td {
     padding: 10px 12px;
     border-bottom: 1px solid var(--grey-2);
@@ -236,15 +249,29 @@ table.mcServerTable tbody tr.mcServerRow.selected {
     background: #EAF8FF;
 }
 
-.mcChevron {
-    display: inline-block;
-    width: 10px;
-    transition: transform .15s ease;
+.mcMuted {
     color: var(--grey-3);
 }
 
-tr.mcServerRow.selected .mcChevron {
-    transform: rotate(90deg);
+.mcDnsCell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mcDnsCell[data-dns-value] {
+    cursor: pointer;
+}
+
+.mcCopyDns {
+    display: inline-flex;
+    align-items: center;
+    color: var(--grey-3);
+    font-size: 11px;
+}
+
+.mcDnsCell[data-dns-value]:hover .mcCopyDns {
+    color: var(--cyan-dark);
 }
 
 .mcDnsDot {
@@ -265,10 +292,12 @@ tr.mcServerRow.selected .mcChevron {
     border-radius: 20px;
     font-size: 11px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .mcBadge.running { background: #E1F8EA; color: #16794E; }
 .mcBadge.stopped { background: var(--grey-2); color: var(--grey-3); }
+.mcBadge.idle { background: #E3F6FF; color: var(--cyan-dark); }
 .mcBadge.pending,
 .mcBadge.stopping,
 .mcBadge.starting,
@@ -281,24 +310,79 @@ tr.mcServerDetail td {
     border-bottom: 1px solid var(--grey-2);
 }
 
-.mcDetailInner {
-    padding: 16px 20px;
+/* ---- Detail panel tabs ---- */
+
+.mcTabsNav {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    gap: 24px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--grey-2);
 }
 
-.mcModsSection {
-    padding: 0 20px 16px;
-}
-
-.mcModsSection h4 {
-    margin: 0 0 8px;
-    font-size: 11px;
+.mcTab {
+    padding: 10px 0;
+    font-size: 13px;
     font-weight: 600;
     color: var(--grey-3);
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+}
+
+.mcTab.active {
+    color: var(--text);
+    border-bottom-color: var(--cyan);
+}
+
+.mcKvGrid {
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px 20px;
+}
+
+.mcKvLabel {
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .05em;
+    color: var(--grey-3);
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.mcKvVal {
+    font-size: 13px;
+    color: var(--text);
+}
+
+.mcActionClusters {
+    padding: 16px 20px;
+    display: flex;
+    align-items: flex-start;
+}
+
+.mcCluster + .mcCluster {
+    border-left: 1px solid var(--grey-2);
+    margin-left: 20px;
+    padding-left: 20px;
+}
+
+.mcClusterLabel {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--grey-3);
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.mcClusterButtons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.mcModsPanel {
+    padding: 16px 20px;
 }
 
 .mcModsList {

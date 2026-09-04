@@ -137,6 +137,7 @@ def main():
         active = service_status == "active"
         status = {
             "gameName": "valheim",
+            "serverName": (odin_status or {}).get("name") if odin_status else None,
             "version": parse_odin_version((odin_status or {}).get("version")) if odin_status else None,
             "serviceStatus": service_status,
             "players": {

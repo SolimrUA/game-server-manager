@@ -242,6 +242,9 @@ def getInfo(tagKey, tagValue):
                 infoDict['DataPath'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'data-path'), None)
                 infoDict['WorldDownloadPaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-paths'), None)
                 infoDict['GameStatus'] = getGameStatus(gameName) if infoDict['State'] == 'running' else None
+                #promoted out of GameStatus to a top-level field per docs/frontend-ui-ux-requirements.md -
+                #the front-end's Server Name column/field expects it there, not nested
+                infoDict['ServerName'] = infoDict['GameStatus'].get('serverName') if infoDict['GameStatus'] else None
                 #independent of instance State - AWS Backup runs on its own daily schedule against the
                 #EBS data volume regardless of whether the instance itself is stopped
                 infoDict['LastBackupTime'] = getLastBackupTime(gameName)

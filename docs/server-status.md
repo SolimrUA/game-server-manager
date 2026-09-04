@@ -46,13 +46,16 @@ sudo -u vintagestory /home/vintagestory/server/server.sh command "announce Resta
 The Control Panel's `getinfo` Lambda (`Lambda/gaming_server_start_stop-v1_0.py`) reads the object for each running
 instance (using the instance's `game-name` tag to build the key) and merges it into the `getinfo` API response as
 `GameStatus`. The front-end (`FrontEnd/js/index.js`) reads `GameStatus` straight off that response - it never talks
-to S3 directly.
+to S3 directly. One field, `serverName`, is additionally promoted to a top-level `ServerName` on the instance
+object itself (see [`docs/frontend-ui-ux-requirements.md`](./frontend-ui-ux-requirements.md)) - the front-end's
+Server Name column expects it there, not nested under `GameStatus`.
 
 ## Schema
 
 ```json
 {
   "gameName": "vintagestory",
+  "serverName": "Geeks Are Here",
   "version": "1.22.6",
   "serviceStatus": "active",
   "players": {
@@ -68,6 +71,9 @@ to S3 directly.
 }
 ```
 
+- `serverName` - the display name players see when connecting/browsing for the server (Vintage Story:
+  `serverconfig.json`'s `ServerName`; Valheim: the `NAME` env var, read back via `odin status`'s own `name`
+  field). `null` if blank/unset. Promoted to the top-level `ServerName` field - see above.
 - `serviceStatus` - whether the game process itself is actually up: `active`, `activating`, `inactive`,
   `deactivating`, `failed`, or `unknown` (the values `systemctl is-active` uses, though an agent can derive this any
   way that's accurate for that game - Vintage Story's checks for the live process directly rather than trusting

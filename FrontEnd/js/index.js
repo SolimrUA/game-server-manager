@@ -39,12 +39,6 @@ function mcGameDisplayName(gameName) {
   return gameName.charAt(0).toUpperCase() + gameName.slice(1);
 }
 
-function mcStateBadgeClass(state) {
-  if (state === 'running') return 'running';
-  if (state === 'stopped') return 'stopped';
-  return 'pending';
-}
-
 // The EC2 instance can be running before/without the game process itself being up (still installing,
 // crash-looping, etc) - this is deliberately a separate badge from the EC2 State one. See docs/server-status.md.
 function mcGameStatus(instance) {
@@ -67,6 +61,98 @@ function mcIdleShutdownStatus(instance) {
   if (status === 'triggered-once') return { text: 'Active (Idle)', badgeClass: 'pending' };
   if (status === 'enabled') return { text: 'Active', badgeClass: 'running' };
   return { text: '—', badgeClass: null };
+}
+
+// Single at-a-glance status combining EC2 State, GameStatus.serviceStatus and IdleShutdownStatus - replaces
+// showing State/Game Status/Auto-Shutdown as three separate columns. Only surfaces "Idle" once idle-shutdown
+// has actually recorded an empty check (IdleShutdownStatus 'triggered-once' - see mcIdleShutdownStatus above);
+// idle-shutdown merely being turned on isn't itself notable enough for the main State column, so that stays
+// visible only in the Overview tab's Auto-Shutdown field.
+function mcCombinedState(instance) {
+  var ec2State = instance['State'];
+  if (ec2State !== 'running') {
+    if (ec2State === 'stopped') return { text: 'Stopped', badgeClass: 'stopped' };
+    var label = ec2State ? ec2State.charAt(0).toUpperCase() + ec2State.slice(1).replace(/-/g, ' ') : 'Unknown';
+    return { text: label + ' (EC2)', badgeClass: 'pending' };
+  }
+  var serviceStatus = instance['GameStatus'] && instance['GameStatus'].serviceStatus;
+  if (serviceStatus === 'failed') return { text: 'Error', badgeClass: 'error' };
+  if (serviceStatus === 'inactive') return { text: 'Stopped (Game)', badgeClass: 'stopped' };
+  if (serviceStatus !== 'active') return { text: 'Starting (Game)', badgeClass: 'pending' };
+  if (instance['IdleShutdownStatus'] === 'triggered-once') return { text: 'Running (Idle)', badgeClass: 'idle' };
+  return { text: 'Running', badgeClass: 'running' };
+}
+
+// The resize Lambda maps this value through a fixed set of environment variables (micro/small/medium/large
+// -> t3a.*, see cfn/control-panel.yaml's StartStopLambda) rather than accepting an EC2 instance type string
+// directly, so the <option> value stays the slug the backend expects - only the label changes to the real
+// type it resolves to. xlarge/2xlarge are left out because the Lambda has no mapping for them yet.
+var MC_RESIZE_OPTIONS = [
+  { value: 'micro', type: 't3a.micro' },
+  { value: 'small', type: 't3a.small' },
+  { value: 'medium', type: 't3a.medium' },
+  { value: 'large', type: 't3a.large' }
+];
+function mcResizeOptionsHtml(currentInstanceType) {
+  return MC_RESIZE_OPTIONS.map(function (opt) {
+    var selected = opt.type === currentInstanceType ? ' selected' : '';
+    return '<option value="' + opt.value + '"' + selected + '>' + opt.type + '</option>';
+  }).join('');
+}
+
+// One state-aware Start/Stop button rather than always showing both - disabled with a transitional label
+// while EC2 itself is mid-transition, since neither action applies until that settles. `permissionDenied`
+// is for the table's quick-action button only (see mcActionClusterHtml callers in the Actions tab, which
+// omit the button entirely instead) - it keeps the button visible but inert, with a tooltip explaining why,
+// rather than the table's column layout shifting per-row based on who's looking at it.
+function mcLifecycleButtonHtml(ec2State, permissionDenied) {
+  var label, cls;
+  if (ec2State === 'stopped') { label = 'Start'; cls = 'start'; }
+  else if (ec2State === 'running') { label = 'Stop'; cls = 'stop'; }
+  else { label = ec2State === 'pending' ? 'Starting…' : 'Stopping…'; cls = 'disabled'; }
+  var disabled = permissionDenied || cls === 'disabled';
+  var title = permissionDenied ? ' title="You don\'t have permission to control this server"' : '';
+  return '<button class="btn ' + cls + ' mcLifecycleBtn"' + (disabled ? ' disabled' : '') + title + '>' + label + '</button>';
+}
+
+function mcDownloadWorldButtonHtml(instanceId, permissionDenied) {
+  var inProgress = worldDownloads[instanceId] && worldDownloads[instanceId].status === 'InProgress';
+  var disabled = inProgress || permissionDenied;
+  var title = permissionDenied ? ' title="You don\'t have permission to download this server\'s world"' : '';
+  return '<button class="btn mcDownloadWorldBtn"' + (disabled ? ' disabled' : '') + title + '>' +
+    (inProgress ? 'Downloading…' : 'Download World') + '</button>';
+}
+
+var MC_COPY_ICON_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none">' +
+  '<rect x="4" y="4" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>' +
+  '<path d="M3 9.5V2.5C3 1.94772 3.44772 1.5 4 1.5H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+  '</svg>';
+
+async function mcCopyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+}
+
+function mcSwitchTab(detailRow, tabName) {
+  detailRow.querySelectorAll('.mcTab').forEach(function (t) {
+    t.classList.toggle('active', t.dataset.tab === tabName);
+  });
+  detailRow.querySelectorAll('.mcTabPanel').forEach(function (p) {
+    p.classList.toggle('hidden', p.dataset.tabPanel !== tabName);
+  });
 }
 
 // Formats "time since a timestamp" - used for both LastBackupTime (AWS Backup's own schedule, independent
@@ -103,6 +189,17 @@ function mcWorldDownloadStatusHtml(instanceId) {
 function mcRefreshWorldDownloadStatusUi(instanceId) {
   var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
   var detailRow = row && row.nextElementSibling;
+  var inProgress = worldDownloads[instanceId] && worldDownloads[instanceId].status === 'InProgress';
+
+  // The table row's quick button and the Actions tab's duplicate both need the same in-progress state.
+  [row, detailRow].forEach(function (scope) {
+    if (!scope) return;
+    scope.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
+      btn.disabled = inProgress;
+      btn.textContent = inProgress ? 'Downloading…' : 'Download World';
+    });
+  });
+
   var span = detailRow && detailRow.querySelector('.mcWorldDownloadStatus');
   if (!span) return;
   span.innerHTML = mcWorldDownloadStatusHtml(instanceId);
@@ -134,91 +231,129 @@ async function renderTable(data) {
     var instances = (data && data[1] && data[1]["Instances"]) || [];
     var tbody = document.getElementById('mcServerTableBody');
     var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
+    var previouslyActiveTab = tbody.querySelector('.mcTab.active') ? tbody.querySelector('.mcTab.active').dataset.tab : 'overview';
 
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="11">No gaming server instances found</td></tr>';
+      tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
       return;
     }
 
     tbody.innerHTML = '';
     instances.forEach(function (instance) {
-      var row = document.createElement('tr');
-      row.className = 'mcServerRow';
-      row.dataset.instanceId = instance['InstanceId'];
-      row.onclick = function () { toggleServerRow(row); };
-
-      var badgeClass = mcStateBadgeClass(instance['State']);
+      var instanceId = instance['InstanceId'];
+      var ec2State = instance['State'];
       var dns = instance['DomainName'] && instance['DomainName'] !== 'No domain tag found' ? instance['DomainName'] : '—';
       var status = instance['GameStatus'];
+      var combinedState = mcCombinedState(instance);
       var gameStatus = mcGameStatus(instance);
-      var playersText = status && status.players && status.players.current != null
-        ? status.players.current + (status.players.max != null ? ' / ' + status.players.max : '')
-        : '—';
-      var versionText = status && status.version ? escapeHtml(status.version) : '—';
-
-      row.innerHTML =
-        '<td><span class="mcChevron">▸</span></td>' +
-        '<td><span class="mcDnsDot" data-dns-dot></span>' + dns + '</td>' +
-        '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
-        '<td>' + (instance['PublicIpAddress'] || '—') + '</td>' +
-        '<td><span class="mcBadge ' + badgeClass + '">' + instance['State'] + '</span></td>' +
-        '<td>' + (gameStatus.badgeClass ? '<span class="mcBadge ' + gameStatus.badgeClass + '">' + gameStatus.text + '</span>' : gameStatus.text) + '</td>' +
-        '<td>' + instance['InstanceType'] + '</td>' +
-        '<td>' + playersText + '</td>' +
-        '<td>' + versionText + '</td>' +
-        '<td>' + mcRelativeTimeText(status && status.lastSaveTime) + '</td>' +
-        '<td>' + mcRelativeTimeText(instance['LastBackupTime']) + '</td>';
-
       var idleStatus = mcIdleShutdownStatus(instance);
       var idlePaused = instance['IdleShutdownStatus'] === 'disabled';
       var canLifecycle = mcIsAdmin || instance['UserLifecycleAllowed'];
       var canDownload = mcIsAdmin || instance['UserDownloadsAllowed'];
+      var playersText = status && status.players && status.players.current != null
+        ? status.players.current + (status.players.max != null ? ' / ' + status.players.max : '')
+        : '—';
+      var versionText = status && status.version ? escapeHtml(status.version) : '—';
+      var lastSaveText = mcRelativeTimeText(status && status.lastSaveTime);
 
-      var toolbarHtml =
-        (canLifecycle ?
-          '<button class="btn stop">Stop</button>' +
-          '<button class="btn start">Start</button>'
-          : '') +
+      var row = document.createElement('tr');
+      row.className = 'mcServerRow';
+      row.dataset.instanceId = instanceId;
+      row.onclick = function () { toggleServerRow(row); };
+
+      row.innerHTML =
+        '<td><span class="mcDnsCell"' + (dns !== '—' ? ' data-dns-value="' + escapeHtml(dns) + '" title="Click to copy"' : '') + '>' +
+          '<span class="mcDnsDot" data-dns-dot></span>' + escapeHtml(dns) +
+          (dns !== '—' ? '<span class="mcCopyDns">' + MC_COPY_ICON_SVG + '</span>' : '') +
+        '</span></td>' +
+        '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
+        '<td class="mcMuted">—</td>' +
+        '<td><span class="mcBadge ' + combinedState.badgeClass + '">' + escapeHtml(combinedState.text) + '</span></td>' +
+        '<td>' + playersText + '</td>' +
+        '<td>' + lastSaveText + '</td>' +
+        '<td>' + mcLifecycleButtonHtml(ec2State, !canLifecycle) + '</td>' +
+        '<td>' + mcDownloadWorldButtonHtml(instanceId, !canDownload) + '</td>';
+
+      var dnsCell = row.querySelector('.mcDnsCell[data-dns-value]');
+      if (dnsCell) dnsCell.onclick = function (e) {
+        e.stopPropagation();
+        var icon = dnsCell.querySelector('.mcCopyDns');
+        var original = icon.innerHTML;
+        mcCopyToClipboard(dnsCell.dataset.dnsValue).then(function (ok) {
+          icon.textContent = ok ? 'Copied' : 'Copy failed';
+          setTimeout(function () { icon.innerHTML = original; }, 1200);
+        });
+      };
+
+      var actionClusters =
+        (canLifecycle ? mcActionClusterHtml('Power', mcLifecycleButtonHtml(ec2State)) : '') +
         (mcIsAdmin ?
-          '<select class="mcResizeSelect">' +
-          '<option value="micro">Micro</option>' +
-          '<option value="small">Small</option>' +
-          '<option value="medium">Medium</option>' +
-          '<option value="large">Large</option>' +
-          '</select>' +
-          '<button class="btn primary">Resize</button>' +
-          '<button class="btn mcBackupNowBtn">Backup Now</button>'
-          : '') +
-        (canDownload ?
-          '<button class="btn mcDownloadWorldBtn">Download World</button>' +
-          '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instance['InstanceId']) + '</span>'
-          : '') +
+          mcActionClusterHtml('Capacity',
+            '<select class="mcResizeSelect">' + mcResizeOptionsHtml(instance['InstanceType']) + '</select>' +
+            '<button class="btn primary">Resize</button>') : '') +
+        ((mcIsAdmin || canDownload) ?
+          mcActionClusterHtml('Data',
+            (mcIsAdmin ? '<button class="btn mcBackupNowBtn">Backup Now</button>' : '') +
+            (canDownload ? mcDownloadWorldButtonHtml(instanceId) +
+              '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '')) : '') +
         (mcIsAdmin ?
-          '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
-          '<span class="mcIdleShutdownStatus">Auto-shutdown: ' + (idleStatus.badgeClass ? '<span class="mcBadge ' + idleStatus.badgeClass + '">' + idleStatus.text + '</span>' : idleStatus.text) + '</span>'
-          : '');
+          mcActionClusterHtml('Automation',
+            '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
+            '<span class="mcMuted">Auto-shutdown: ' + escapeHtml(idleStatus.text) + '</span>') : '');
+
+      var overviewHtml =
+        mcKvHtml('Game', mcGameDisplayName(instance['GameName'])) +
+        mcKvHtml('Server Name', '—') +
+        mcKvHtml('EC2 State', escapeHtml(ec2State || '—')) +
+        mcKvHtml('Game State', escapeHtml(gameStatus.text)) +
+        mcKvHtml('Auto-Shutdown', escapeHtml(idleStatus.text)) +
+        mcKvHtml('Players', playersText) +
+        mcKvHtml('Last Save', lastSaveText) +
+        mcKvHtml('Type', escapeHtml(instance['InstanceType'] || '—')) +
+        mcKvHtml('IP Address', escapeHtml(instance['PublicIpAddress'] || '—')) +
+        mcKvHtml('Version', versionText) +
+        mcKvHtml('Last Backup', mcRelativeTimeText(instance['LastBackupTime']));
 
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
       detailRow.innerHTML =
-        '<td colspan="11">' +
-        (toolbarHtml ? '<div class="mcDetailInner">' + toolbarHtml + '</div>' : '') +
-        '<div class="mcModsSection"><h4>Mods</h4>' + renderModsList(status && status.mods) + '</div>' +
+        '<td colspan="8">' +
+        '<div class="mcTabsNav">' +
+          '<div class="mcTab" data-tab="overview">Overview</div>' +
+          '<div class="mcTab" data-tab="actions">Actions</div>' +
+          '<div class="mcTab" data-tab="mods">Mods</div>' +
+        '</div>' +
+        '<div class="mcTabPanel mcKvGrid" data-tab-panel="overview">' + overviewHtml + '</div>' +
+        '<div class="mcTabPanel mcActionClusters" data-tab-panel="actions">' + actionClusters + '</div>' +
+        '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' + renderModsList(status && status.mods) + '</div>' +
         '</td>';
 
-      var instanceId = instance['InstanceId'];
+      detailRow.querySelectorAll('.mcTab').forEach(function (tab) {
+        tab.onclick = function (e) { e.stopPropagation(); mcSwitchTab(detailRow, tab.dataset.tab); };
+      });
+      mcSwitchTab(detailRow, previouslyActiveTab);
+
       var select = detailRow.querySelector('select');
-      var stopBtn = detailRow.querySelector('.stop');
-      var startBtn = detailRow.querySelector('.start');
       var resizeBtn = detailRow.querySelector('.primary');
       var backupBtn = detailRow.querySelector('.mcBackupNowBtn');
-      var downloadBtn = detailRow.querySelector('.mcDownloadWorldBtn');
       var idleToggleBtn = detailRow.querySelector('.mcIdleShutdownToggleBtn');
-      if (stopBtn) stopBtn.onclick = function (e) { e.stopPropagation(); showAlert('Stopping the Server'); stopServer(instanceId); };
-      if (startBtn) startBtn.onclick = function (e) { e.stopPropagation(); showAlert('Starting the Server'); startServer(instanceId); };
+
+      // Both the table row's quick lifecycle/download buttons and their Actions-tab duplicates get the
+      // same handler - clicking either does the same thing.
+      [row, detailRow].forEach(function (scope) {
+        var lifecycleBtn = scope.querySelector('.mcLifecycleBtn');
+        if (lifecycleBtn && !lifecycleBtn.disabled) lifecycleBtn.onclick = function (e) {
+          e.stopPropagation();
+          if (ec2State === 'stopped') { showAlert('Starting the Server'); startServer(instanceId); }
+          else { showAlert('Stopping the Server'); stopServer(instanceId); }
+        };
+        scope.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
+          btn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
+        });
+      });
+
       if (resizeBtn) resizeBtn.onclick = function (e) { e.stopPropagation(); showAlert('Please wait... Resizing your server'); resizeServer(select.value, instanceId); };
       if (backupBtn) backupBtn.onclick = function (e) { e.stopPropagation(); showAlert('Starting backup'); backupNow(instanceId); };
-      if (downloadBtn) downloadBtn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
       if (idleToggleBtn) idleToggleBtn.onclick = function (e) {
         e.stopPropagation();
         if (idlePaused) { showAlert('Resuming auto-shutdown'); resumeIdleShutdown(instanceId); }
@@ -245,6 +380,15 @@ async function renderTable(data) {
         });
       }
     });
+}
+
+function mcActionClusterHtml(label, buttonsHtml) {
+  return '<div class="mcCluster"><div class="mcClusterLabel">' + label + '</div>' +
+    '<div class="mcClusterButtons">' + buttonsHtml + '</div></div>';
+}
+
+function mcKvHtml(label, value) {
+  return '<div><div class="mcKvLabel">' + label + '</div><div class="mcKvVal">' + value + '</div></div>';
 }
 
 function toggleServerRow(rowEl) {

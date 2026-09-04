@@ -70,6 +70,19 @@ def read_max_players():
         return None
 
 
+def read_server_name():
+    #the display name players see in the server browser - whatever install.sh patched into
+    #serverconfig.json's ServerName field at setup time (see vintagestory-prepare-data.sh). Currently
+    #that's just a blank space (VSNAME=" ") on a fresh install, so strip and treat blank as unset rather
+    #than reporting a name that's literally just whitespace.
+    try:
+        with open(CONFIG_PATH) as f:
+            config = json.load(f)
+        return (config.get("ServerName") or "").strip() or None
+    except Exception:
+        return None
+
+
 def read_last_save_time():
     #distinct from AWS Backup's LastBackupTime (a separate, infrastructure-level EBS snapshot) - this is
     #when the game itself last wrote the active world, per serverconfig.json's own WorldConfig.SaveFileLocation
@@ -147,6 +160,7 @@ def main():
         service_status = read_service_status()
         status = {
             "gameName": "vintagestory",
+            "serverName": read_server_name(),
             "version": version,
             "serviceStatus": service_status,
             "players": {
