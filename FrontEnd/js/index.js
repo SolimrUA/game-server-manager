@@ -123,7 +123,7 @@ function mcDownloadWorldButtonHtml(instanceId, permissionDenied) {
     (inProgress ? 'Downloading…' : 'Download World') + '</button>';
 }
 
-var MC_COPY_ICON_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none">' +
+var MC_COPY_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none">' +
   '<rect x="4" y="4" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>' +
   '<path d="M3 9.5V2.5C3 1.94772 3.44772 1.5 4 1.5H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
   '</svg>';
@@ -230,8 +230,14 @@ function renderModsList(mods) {
 async function renderTable(data) {
     var instances = (data && data[1] && data[1]["Instances"]) || [];
     var tbody = document.getElementById('mcServerTableBody');
-    var previouslySelectedInstanceId = tbody.querySelector('tr.mcServerRow.selected') ? tbody.querySelector('tr.mcServerRow.selected').dataset.instanceId : null;
-    var previouslyActiveTab = tbody.querySelector('.mcTab.active') ? tbody.querySelector('.mcTab.active').dataset.tab : 'overview';
+    var previouslySelectedRow = tbody.querySelector('tr.mcServerRow.selected');
+    var previouslySelectedInstanceId = previouslySelectedRow ? previouslySelectedRow.dataset.instanceId : null;
+    // Scoped to the selected row's own detail panel - querying the whole tbody would find whichever
+    // row happens to come first in the list (still showing its default Overview tab), not the tab the
+    // user actually has open on the expanded row, and periodic refreshes would keep snapping back to it.
+    var previouslyActiveDetail = previouslySelectedRow && previouslySelectedRow.nextElementSibling;
+    var previouslyActiveTabEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcTab.active');
+    var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
 
     if (instances.length === 0) {
       tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
@@ -331,7 +337,9 @@ async function renderTable(data) {
       detailRow.querySelectorAll('.mcTab').forEach(function (tab) {
         tab.onclick = function (e) { e.stopPropagation(); mcSwitchTab(detailRow, tab.dataset.tab); };
       });
-      mcSwitchTab(detailRow, previouslyActiveTab);
+      // Only the row that was actually open keeps its tab - every other (hidden) row starts fresh on
+      // Overview rather than inheriting whatever tab happened to be open elsewhere.
+      mcSwitchTab(detailRow, instanceId === previouslySelectedInstanceId ? previouslyActiveTab : 'overview');
 
       var select = detailRow.querySelector('select');
       var resizeBtn = detailRow.querySelector('.primary');

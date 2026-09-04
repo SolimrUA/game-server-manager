@@ -70,10 +70,10 @@ ul.top-nav li a {
     text-decoration: none;
     min-height: 16px;
     text-align: center;
-    padding: 14px;
+    padding: 16px;
     color: #A7B0BE;
     background-color: var(--dark);
-    font-size: 13px;
+    font-size: 14px;
 }
 
 ul.top-nav li a:hover {
@@ -126,10 +126,10 @@ ul.top-nav li.dropdownIcon {
 
 /* ############## Page ############## */
 
-main {
-    padding: 24px 28px;
-    max-width: 1100px;
+.mcPageContent {
+    max-width: 1600px;
     margin: 0 auto;
+    padding: 0 32px;
 }
 
 .page-title {
@@ -137,7 +137,7 @@ main {
 }
 
 .page-title h1 {
-    font-size: 20px;
+    font-size: 26px;
     font-weight: 600;
     margin: 0;
 }
@@ -148,8 +148,8 @@ main {
     border: 1px solid var(--grey-2);
     background: var(--white);
     border-radius: 6px;
-    padding: 6px 14px;
-    font-size: 13px;
+    padding: 8px 16px;
+    font-size: 14px;
     cursor: pointer;
     color: var(--text);
 }
@@ -204,8 +204,8 @@ main {
 select.mcResizeSelect {
     border: 1px solid var(--grey-2);
     border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 13px;
+    padding: 8px 12px;
+    font-size: 14px;
 }
 
 /* ############## Server Table ############## */
@@ -213,7 +213,7 @@ select.mcResizeSelect {
 table.mcServerTable {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 14px;
 }
 
 table.mcServerTable thead th {
@@ -221,9 +221,9 @@ table.mcServerTable thead th {
     font-weight: 600;
     color: var(--grey-3);
     text-transform: uppercase;
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: .04em;
-    padding: 8px 12px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--grey-2);
     background: var(--grey-1);
 }
@@ -233,7 +233,7 @@ table.mcServerTable thead th.mcActionsHeader {
 }
 
 table.mcServerTable tbody td {
-    padding: 10px 12px;
+    padding: 13px 14px;
     border-bottom: 1px solid var(--grey-2);
 }
 
@@ -267,7 +267,7 @@ table.mcServerTable tbody tr.mcServerRow.selected {
     display: inline-flex;
     align-items: center;
     color: var(--grey-3);
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .mcDnsCell[data-dns-value]:hover .mcCopyDns {
@@ -276,8 +276,8 @@ table.mcServerTable tbody tr.mcServerRow.selected {
 
 .mcDnsDot {
     display: inline-block;
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     margin-right: 6px;
     background: var(--grey-2);
@@ -288,9 +288,9 @@ table.mcServerTable tbody tr.mcServerRow.selected {
 
 .mcBadge {
     display: inline-block;
-    padding: 2px 10px;
+    padding: 4px 12px;
     border-radius: 20px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -320,8 +320,8 @@ tr.mcServerDetail td {
 }
 
 .mcTab {
-    padding: 10px 0;
-    font-size: 13px;
+    padding: 12px 0;
+    font-size: 14px;
     font-weight: 600;
     color: var(--grey-3);
     border-bottom: 2px solid transparent;
@@ -334,55 +334,55 @@ tr.mcServerDetail td {
 }
 
 .mcKvGrid {
-    padding: 16px 20px;
+    padding: 20px 24px;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 16px 20px;
+    gap: 18px 24px;
 }
 
 .mcKvLabel {
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: .05em;
     color: var(--grey-3);
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 5px;
 }
 
 .mcKvVal {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text);
 }
 
 .mcActionClusters {
-    padding: 16px 20px;
+    padding: 20px 24px;
     display: flex;
     align-items: flex-start;
 }
 
 .mcCluster + .mcCluster {
     border-left: 1px solid var(--grey-2);
-    margin-left: 20px;
-    padding-left: 20px;
+    margin-left: 24px;
+    padding-left: 24px;
 }
 
 .mcClusterLabel {
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: .05em;
     color: var(--grey-3);
     font-weight: 600;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 
 .mcClusterButtons {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: center;
 }
 
 .mcModsPanel {
-    padding: 16px 20px;
+    padding: 20px 24px;
 }
 
 .mcModsList {
@@ -398,8 +398,8 @@ tr.mcServerDetail td {
     background: var(--white);
     border: 1px solid var(--grey-2);
     border-radius: 20px;
-    padding: 2px 10px;
-    font-size: 12px;
+    padding: 4px 12px;
+    font-size: 13px;
 }
 
 .mcModVersion {
@@ -408,7 +408,7 @@ tr.mcServerDetail td {
 
 .mcModsEmpty {
     margin: 0;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--grey-3);
 }
 
@@ -423,11 +423,12 @@ tr.mcServerDetail td {
 /* ############# Alert ################ */
 
 .alert {
-    padding: 12px 20px;
+    padding: 14px 24px;
     background-color: var(--dark);
     color: var(--white);
-    margin: 16px 28px 0;
+    margin: 16px 0 0;
     border-radius: 6px;
+    font-size: 14px;
 }
 
 .alert .closebtn {
@@ -453,6 +454,7 @@ tr.mcServerDetail td {
     background-color: var(--dark);
     color: var(--cyan);
     text-align: center;
-    padding: 6px 0;
+    padding: 8px 0;
+    font-size: 14px;
 }
 
