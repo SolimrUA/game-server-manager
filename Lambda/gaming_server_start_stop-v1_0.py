@@ -184,11 +184,15 @@ def lambda_handler(event, context): #standard function called on lambda invocati
         i = targetInstances[0]
         gameName = i.get('GameName')
         dataPath = i.get('DataPath')
-        includePaths = i.get('WorldDownloadPaths')
+        #"core" (Download Just World) vs "full" (Download All Data) - see
+        #docs/frontend-ui-ux-requirements.md. Anything other than exactly "core" defaults to full, matching
+        #the front-end's own fallback and keeping this backward compatible with any other caller.
+        scope = 'core' if event.get('scope') == 'core' else 'full'
+        includePaths = i.get('WorldDownloadCorePaths') if scope == 'core' else i.get('WorldDownloadPaths')
         if not gameName or not dataPath or not includePaths:
             return {"status": "Failed", "error": "Instance is missing its game-name/data-path/world-download-paths tag"}
         try:
-            return startWorldDownload(i['InstanceId'], gameName, dataPath, includePaths)
+            return startWorldDownload(i['InstanceId'], gameName, dataPath, includePaths, scope)
         except Exception as e:
             print("startWorldDownload failed: "+str(e))
             return {"status": "Failed", "error": "Could not start the world download"}
@@ -241,6 +245,7 @@ def getInfo(tagKey, tagValue):
                 infoDict['GameName'] = gameName
                 infoDict['DataPath'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'data-path'), None)
                 infoDict['WorldDownloadPaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-paths'), None)
+                infoDict['WorldDownloadCorePaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-core-paths'), None)
                 infoDict['GameStatus'] = getGameStatus(gameName) if infoDict['State'] == 'running' else None
                 #promoted out of GameStatus to a top-level field per docs/frontend-ui-ux-requirements.md -
                 #the front-end's Server Name column/field expects it there, not nested
@@ -321,16 +326,18 @@ def startBackupNow(gameName, accountId):
         IamRoleArn=roleArn,
     )
 
-def startWorldDownload(instanceId, gameName, dataPath, includePaths):
+def startWorldDownload(instanceId, gameName, dataPath, includePaths, scope):
     #Zips specific subfolders of the currently-live, currently-mounted data directory (not the whole
     #thing - e.g. Vintage Story's serverconfig.json has a Password field in it that has no business in a
     #downloadable file) via SSM Run Command and uploads the result to the shared status bucket under a
     #worlds/ prefix. Only works while the instance is running. includePaths is a comma-separated list of
-    #paths relative to dataPath (the world-download-paths tag, set per-game in cfn/server-stack.yaml) -
-    #kept driven by a tag rather than hardcoded here so this stays game-agnostic. The S3 key is built up
-    #front, not parsed out of the command's own output later, which would be fragile.
+    #paths relative to dataPath (world-download-paths or world-download-core-paths, depending on scope -
+    #both tags set per-game in cfn/server-stack.yaml) - kept driven by tags rather than hardcoded here so
+    #this stays game-agnostic. The S3 key is built up front, not parsed out of the command's own output
+    #later, which would be fragile. instanceId immediately follows the prefix (not scope) so
+    #getWorldDownloadStatus's ownership check (expectedPrefix, above) doesn't need to change per scope.
     bucket = os.environ.get('statusBucket')
-    key = 'worlds/'+gameName+'/'+instanceId+'-'+str(int(time.time()))+'.zip'
+    key = 'worlds/'+gameName+'/'+instanceId+'-'+scope+'-'+str(int(time.time()))+'.zip'
     folders = ' '.join('"'+p.strip()+'"' for p in includePaths.split(','))
     commands = [
         #tolerates any of the listed folders not existing yet (e.g. a brand new world may have no
@@ -363,7 +370,24 @@ def getWorldDownloadStatus(commandId, instanceId, s3Key):
         #generating this URL is a local signing operation and succeeds regardless of the signer's actual
         #permissions - the s3:GetObject grant on this Lambda's role is what makes the URL actually work
         #when the browser follows it, enforced at click-time, not here
-        url = s3.generate_presigned_url('get_object', Params={'Bucket': bucket, 'Key': s3Key}, ExpiresIn=900)
+        #
+        #s3Key is worlds/<gameName>/<instanceId>-<scope>-<epoch>.zip (see startWorldDownload) - parsed back
+        #out here to build a human-readable download filename (real date/time instead of a raw epoch) via
+        #Content-Disposition, decoupled from the S3 key's own naming, which stays optimized for
+        #uniqueness/organization rather than readability.
+        gameName = s3Key.split('/')[1] if s3Key.count('/') >= 1 else 'server'
+        try:
+            suffix = s3Key.rsplit('/', 1)[-1][len(instanceId)+1:-4]  # "<scope>-<epoch>"
+            scope, epochStr = suffix.rsplit('-', 1)
+            timestamp = time.strftime('%Y%m%d-%H%M%S', time.gmtime(int(epochStr)))
+            filename = '{}-{}-{}.zip'.format(gameName, scope, timestamp)
+        except Exception:
+            filename = s3Key.rsplit('/', 1)[-1]
+        url = s3.generate_presigned_url('get_object', Params={
+            'Bucket': bucket,
+            'Key': s3Key,
+            'ResponseContentDisposition': 'attachment; filename="{}"'.format(filename),
+        }, ExpiresIn=900)
         return {"status": "Success", "url": url}
     return {"status": "Failed", "error": result.get('StandardErrorContent', '')[:500]}
 

@@ -16,6 +16,7 @@ Metadata:
           - GameServerCompanionSha256
           - DataPath
           - WorldDownloadPaths
+          - WorldDownloadCorePaths
           - InstanceType
           - DiskSize
           - DiskType
@@ -51,7 +52,9 @@ Metadata:
       DataPath:
         default: Absolute path where this game's world/mod data is mounted on the instance (e.g. /home/vintagestory/data)
       WorldDownloadPaths:
-        default: Comma-separated subfolders of DataPath to include in "Download World" zips (e.g. Saves,Mods,Playerdata)
+        default: Comma-separated subfolders of DataPath to include in "Download (All Data)" zips (e.g. Saves,Mods,Playerdata)
+      WorldDownloadCorePaths:
+        default: Comma-separated subfolders of DataPath to include in "Download (Just World)" zips - a subset of WorldDownloadPaths (e.g. Saves)
       InstanceType:
         default: Select the server size (we recommend selecting a larger instance for initial install and then changing this to a smaller size later).
       DiskSize:
@@ -208,6 +211,15 @@ Parameters:
     AllowedPattern: '^[^,]+(,[^,]+)*$'
     ConstraintDescription: Must be a comma-separated list of relative paths.
     Type: String
+  WorldDownloadCorePaths:
+    Description: >-
+      Comma-separated list of paths, relative to DataPath, that "Download (Just World)" includes - a subset
+      of WorldDownloadPaths covering just the actual world save, without mods/player data/etc (e.g. "Saves"
+      for Vintage Story, "saves" for Valheim). Kept as its own explicit tag rather than inferred from
+      WorldDownloadPaths so it doesn't silently break if that list is ever reordered.
+    AllowedPattern: '^[^,]+(,[^,]+)*$'
+    ConstraintDescription: Must be a comma-separated list of relative paths.
+    Type: String
   InstanceType:
     Description: 'Select the AWS EC2 instance type you want.  You can change avaialble options later via the AWS Console - see blog entry for more details'
     AllowedPattern: .+
@@ -315,6 +327,8 @@ Resources:
           Value: !Ref DataPath
         - Key: world-download-paths
           Value: !Ref WorldDownloadPaths
+        - Key: world-download-core-paths
+          Value: !Ref WorldDownloadCorePaths
         - Key: user-lifecycle-allowed
           Value: !Ref AllowUserLifecycle
         - Key: user-downloads-allowed

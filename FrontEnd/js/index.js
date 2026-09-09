@@ -115,12 +115,17 @@ function mcLifecycleButtonHtml(ec2State, permissionDenied) {
   return '<button class="btn ' + cls + ' mcLifecycleBtn"' + (disabled ? ' disabled' : '') + title + '>' + label + '</button>';
 }
 
-function mcDownloadWorldButtonHtml(instanceId, permissionDenied) {
+// `scope` is 'full' (world save + mods + player data - everything WorldDownloadPaths lists) or 'core'
+// (world save only). Only one download can run at a time per instance either way - the SSM command zips
+// to a fixed /tmp path on the instance, so a second one while the first is still running would collide -
+// hence disabling every download button (both scopes, table and Actions tab alike) whenever any download
+// for this instance is in progress, not just the one that was clicked.
+function mcDownloadWorldButtonHtml(instanceId, scope, label, permissionDenied) {
   var inProgress = worldDownloads[instanceId] && worldDownloads[instanceId].status === 'InProgress';
   var disabled = inProgress || permissionDenied;
   var title = permissionDenied ? ' title="You don\'t have permission to download this server\'s world"' : '';
-  return '<button class="btn mcDownloadWorldBtn"' + (disabled ? ' disabled' : '') + title + '>' +
-    (inProgress ? 'Downloading…' : 'Download World') + '</button>';
+  return '<button class="btn mcDownloadWorldBtn" data-scope="' + scope + '" data-label="' + escapeHtml(label) + '"' +
+    (disabled ? ' disabled' : '') + title + '>' + (inProgress ? 'Downloading…' : escapeHtml(label)) + '</button>';
 }
 
 var MC_COPY_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none">' +
@@ -178,10 +183,11 @@ var worldDownloads = {};
 function mcWorldDownloadStatusHtml(instanceId) {
   var dl = worldDownloads[instanceId];
   if (!dl) return '';
-  if (dl.status === 'Success') return '<a href="' + dl.url + '" target="_blank">Download</a>';
+  var scopeLabel = dl.scope === 'core' ? 'core files' : 'full';
+  if (dl.status === 'Success') return '<a href="' + dl.url + '" target="_blank">Download (' + escapeHtml(scopeLabel) + ')</a>';
   if (dl.status === 'Failed') return 'Failed: ' + escapeHtml(dl.error || 'unknown error');
   if (dl.status === 'RetryPrompt') return '<a href="javascript:void(0)" class="mcRetryWorldDownloadCheck">Still processing - click to check again</a>';
-  return 'Preparing archive…' + (dl.attempt ? ' (' + dl.attempt + ')' : '');
+  return 'Preparing ' + scopeLabel + ' archive…' + (dl.attempt ? ' (' + dl.attempt + ')' : '');
 }
 
 // Pushes the current worldDownloads state into the live DOM, if that row still exists right now (it
@@ -191,12 +197,12 @@ function mcRefreshWorldDownloadStatusUi(instanceId) {
   var detailRow = row && row.nextElementSibling;
   var inProgress = worldDownloads[instanceId] && worldDownloads[instanceId].status === 'InProgress';
 
-  // The table row's quick button and the Actions tab's duplicate both need the same in-progress state.
-  [row, detailRow].forEach(function (scope) {
-    if (!scope) return;
-    scope.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
+  // The table row's quick button and the Actions tab's duplicates both need the same in-progress state.
+  [row, detailRow].forEach(function (container) {
+    if (!container) return;
+    container.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
       btn.disabled = inProgress;
-      btn.textContent = inProgress ? 'Downloading…' : 'Download World';
+      btn.textContent = inProgress ? 'Downloading…' : btn.dataset.label;
     });
   });
 
@@ -278,7 +284,7 @@ async function renderTable(data) {
         '<td>' + playersText + '</td>' +
         '<td>' + lastSaveText + '</td>' +
         '<td>' + mcLifecycleButtonHtml(ec2State, !canLifecycle) + '</td>' +
-        '<td>' + mcDownloadWorldButtonHtml(instanceId, !canDownload) + '</td>';
+        '<td>' + mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)', !canDownload) + '</td>';
 
       var dnsCell = row.querySelector('.mcDnsCell[data-dns-value]');
       if (dnsCell) dnsCell.onclick = function (e) {
@@ -300,7 +306,9 @@ async function renderTable(data) {
         ((mcIsAdmin || canDownload) ?
           mcActionClusterHtml('Data',
             (mcIsAdmin ? '<button class="btn mcBackupNowBtn">Backup Now</button>' : '') +
-            (canDownload ? mcDownloadWorldButtonHtml(instanceId) +
+            (canDownload ?
+              mcDownloadWorldButtonHtml(instanceId, 'full', 'Download (All Data)') +
+              mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)') +
               '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '')) : '') +
         (mcIsAdmin ?
           mcActionClusterHtml('Automation',
@@ -348,15 +356,15 @@ async function renderTable(data) {
 
       // Both the table row's quick lifecycle/download buttons and their Actions-tab duplicates get the
       // same handler - clicking either does the same thing.
-      [row, detailRow].forEach(function (scope) {
-        var lifecycleBtn = scope.querySelector('.mcLifecycleBtn');
+      [row, detailRow].forEach(function (container) {
+        var lifecycleBtn = container.querySelector('.mcLifecycleBtn');
         if (lifecycleBtn && !lifecycleBtn.disabled) lifecycleBtn.onclick = function (e) {
           e.stopPropagation();
           if (ec2State === 'stopped') { showAlert('Starting the Server'); startServer(instanceId); }
           else { showAlert('Stopping the Server'); stopServer(instanceId); }
         };
-        scope.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
-          btn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId); };
+        container.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
+          btn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId, btn.dataset.scope); };
         });
       });
 
@@ -543,35 +551,41 @@ async function setIdleShutdown(path, instanceId) {
 // comes back.
 // State lives in worldDownloads (not a captured DOM element) since the periodic refresh rebuilds the
 // whole table every few seconds - see the comment on worldDownloads itself.
-async function downloadWorld(instanceId) {
-  worldDownloads[instanceId] = { status: 'InProgress', attempt: 0 };
+// `scope` is 'full' (everything WorldDownloadPaths lists - mods, player data, world save) or 'core'
+// (world save only) - see mcDownloadWorldButtonHtml above. NOTE: the downloadworldstart Lambda doesn't
+// read this parameter yet - see docs/frontend-ui-ux-requirements.md's "Core vs. full world download"
+// section - so until that's wired up, 'core' produces the same (full) archive as 'full' does.
+async function downloadWorld(instanceId, scope) {
+  scope = scope || 'full';
+  worldDownloads[instanceId] = { status: 'InProgress', attempt: 0, scope: scope };
   mcRefreshWorldDownloadStatusUi(instanceId);
   var jwt = await getJwt();
 
-  var startUrl = API_URL + "downloadworldstart/" + query_string + "&instanceid=" + encodeURIComponent(instanceId);
+  var startUrl = API_URL + "downloadworldstart/" + query_string +
+    "&instanceid=" + encodeURIComponent(instanceId) + "&scope=" + encodeURIComponent(scope);
   var startResp = await fetch(startUrl, { method: 'get', headers: new Headers({ 'Authorization': jwt }) });
   var startData = await startResp.json();
 
   if (startData.status === 'Failed') {
-    worldDownloads[instanceId] = { status: 'Failed', error: startData.error || 'could not start' };
+    worldDownloads[instanceId] = { status: 'Failed', error: startData.error || 'could not start', scope: scope };
     mcRefreshWorldDownloadStatusUi(instanceId);
     return;
   }
 
-  pollWorldDownloadStatus(instanceId, startData.commandId, startData.s3Key, 0);
+  pollWorldDownloadStatus(instanceId, startData.commandId, startData.s3Key, 0, scope);
 }
 
 function retryWorldDownload(instanceId) {
   var dl = worldDownloads[instanceId];
   if (!dl || !dl.commandId) return;
-  worldDownloads[instanceId] = { status: 'InProgress', attempt: 0 };
+  worldDownloads[instanceId] = { status: 'InProgress', attempt: 0, scope: dl.scope };
   mcRefreshWorldDownloadStatusUi(instanceId);
-  pollWorldDownloadStatus(instanceId, dl.commandId, dl.s3Key, 0);
+  pollWorldDownloadStatus(instanceId, dl.commandId, dl.s3Key, 0, dl.scope);
 }
 
 // Zipping+uploading a multi-GB world takes an unbounded amount of time, and API Gateway can't hold a
 // request open past 29s anyway - so this polls a separate status endpoint rather than blocking on one call.
-async function pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt) {
+async function pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt, scope) {
   var maxAttempts = 60; // 60 * 5s = 5 minutes
   var jwt = await getJwt();
   var statusUrl = API_URL + "downloadworldstatus/" + query_string +
@@ -582,24 +596,24 @@ async function pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt) {
   var data = await resp.json();
 
   if (data.status === 'Success') {
-    worldDownloads[instanceId] = { status: 'Success', url: data.url };
+    worldDownloads[instanceId] = { status: 'Success', url: data.url, scope: scope };
     mcRefreshWorldDownloadStatusUi(instanceId);
     return;
   }
   if (data.status === 'Failed') {
-    worldDownloads[instanceId] = { status: 'Failed', error: data.error };
+    worldDownloads[instanceId] = { status: 'Failed', error: data.error, scope: scope };
     mcRefreshWorldDownloadStatusUi(instanceId);
     return;
   }
   if (attempt >= maxAttempts) {
-    worldDownloads[instanceId] = { status: 'RetryPrompt', commandId: commandId, s3Key: s3Key };
+    worldDownloads[instanceId] = { status: 'RetryPrompt', commandId: commandId, s3Key: s3Key, scope: scope };
     mcRefreshWorldDownloadStatusUi(instanceId);
     return;
   }
-  worldDownloads[instanceId] = { status: 'InProgress', attempt: attempt + 1 };
+  worldDownloads[instanceId] = { status: 'InProgress', attempt: attempt + 1, scope: scope };
   mcRefreshWorldDownloadStatusUi(instanceId);
   await sleep(5000);
-  pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt + 1);
+  pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt + 1, scope);
 }
 
 async function dnsLookup(dN) {

@@ -3,3 +3,5 @@ CdkAssetPublisher/cdk.out/
 CdkAssetPublisher/.env
 CdkAssetPublisher/cdk-asset-publisher
 *.pyc
+FrontEnd/js/index.js
+docs/*requirements.md
