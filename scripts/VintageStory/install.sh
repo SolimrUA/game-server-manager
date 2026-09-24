@@ -18,8 +18,20 @@ BASEURL="${INSTALLSCRIPTURL%/*}"
 #environment by default and would drop this - this whole script already runs as root anyway.
 export DEBIAN_FRONTEND=noninteractive
 
-apt update && apt upgrade -y
-sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps
+#confirmed live: this duplicates the outer UserData's own apt update/upgrade (cfn/server-stack.yaml), but
+#that copy runs before this script is even fetched, so its result isn't visible here - keeping a second
+#pass is deliberate defense in depth. Same retry/non-fatal treatment as the outer copy, for the same
+#reason: a transient regional-mirror desync (a specific .deb 404ing before the mirror catches up with
+#security.ubuntu.com's index) shouldn't abort the whole install under this script's own `set -e`, and
+#routine OS upgrades aren't required for the game server itself to run.
+apt update || (sleep 5 && apt update) || (sleep 15 && apt update)
+apt upgrade -y || echo "apt upgrade failed - continuing, not required for the game server itself"
+#unlike apt upgrade, these specific packages ARE required (wget/curl for downloads, jq for JSON parsing
+#elsewhere, python3 for status_agent.py, screen for the detached game session, etc.) - retry instead of
+#tolerating failure outright
+sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps \
+  || (sleep 5 && sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps) \
+  || (sleep 15 && sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps)
 
 #Canonical's AMI ships the SSM Agent pre-installed and auto-started - this is just cheap insurance for the
 #rare AMI variant where it's present but not running. Needed for the Control Panel's "Download Backup"
@@ -58,8 +70,20 @@ else
   aws ssm put-parameter --name "$PARAMNAME" --value "$VSPW" --type "SecureString" --overwrite
 fi
 
-#pinned server version - check https://account.vintagestory.at/downloads for newer stable releases
-VSVERSION=1.22.6
+#version to install - a CFN GameVersion parameter (see cfn/server-stack.yaml), written by UserData before
+#this script runs. Deliberately no silent fallback to some hardcoded default here: that's exactly what
+#caused a live instance to silently revert from 1.22.7 to an old pinned version after a CreateInstance
+#cycle, undoing a real update without any clear signal that it happened. Failing loudly instead - this
+#script runs under the caller's `bash -xe` with a `trap ... EXIT` that reports failure back via
+#cfn-signal, so a missing GameVersion surfaces as a failed CloudFormation stack operation, not a
+#silently-wrong install. GameVersion itself stays optional at the CFN parameter level (Default: '') since
+#not every game honors it (e.g. Valheim auto-updates on its own) - the requirement is enforced here,
+#specific to Vintage Story.
+VSVERSION=$(cat /etc/game-server-manager/gameVersion.txt 2>/dev/null)
+if [ -z "$VSVERSION" ]; then
+  echo "GameVersion is required for Vintage Story - set it in the server stack's CloudFormation parameters (e.g. 1.22.7). See https://account.vintagestory.at/downloads for available versions." >&2
+  exit 1
+fi
 VSPORT=42420
 VSNAME=" "
 
@@ -71,7 +95,6 @@ VSNAME=" "
 id -u vintagestory &>/dev/null || sudo useradd vintagestory -m
 sudo usermod -aG vintagestory ubuntu
 sudo mkdir -p /home/vintagestory/server
-echo $VSVERSION | sudo -u vintagestory tee /home/vintagestory/version.txt > /dev/null
 
 #download and unpack the dedicated server - this also gives us server.sh, the game's own launcher script.
 #This is ephemeral (redownloaded fresh on every new instance, unlike the persistent data volume), which is

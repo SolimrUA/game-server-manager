@@ -14,6 +14,7 @@ Metadata:
           - GameServer
           - GameServerSha256
           - GameServerCompanionSha256
+          - GameVersion
           - DataPath
           - WorldDownloadPaths
           - WorldDownloadCorePaths
@@ -49,6 +50,8 @@ Metadata:
         default: Expected SHA256 of the GameServer script, verified before it runs (see CdkAssetPublisher output)
       GameServerCompanionSha256:
         default: Expected SHA256 of GameServer's companion file, if it has one - leave blank otherwise
+      GameVersion:
+        default: Exact game version to install (e.g. 1.22.7) - leave blank for the script's own default. Game-specific; not every game honors this.
       DataPath:
         default: Absolute path where this game's world/mod data is mounted on the instance (e.g. /home/vintagestory/data)
       WorldDownloadPaths:
@@ -191,6 +194,15 @@ Parameters:
       whose script has no companion file to verify.
     AllowedPattern: '^([a-f0-9]{64})?$'
     ConstraintDescription: Must be blank or a 64-character lowercase hex SHA256 digest.
+    Default: ''
+    Type: String
+  GameVersion:
+    Description: >-
+      Exact game server version to install (e.g. 1.22.7 for Vintage Story) - a CreateInstance cycle always
+      does a fresh install from scratch, so without this the version came from a hardcoded default baked
+      into that game's install script, silently reverting any in-place "Update Game" you'd done on a
+      previous instance. Leave blank to use that script's own built-in default. Meaning is game-specific -
+      not every cartridge script honors this (e.g. Valheim already auto-updates on its own schedule).
     Default: ''
     Type: String
   DataPath:
@@ -346,8 +358,15 @@ Resources:
           - |
             #!/bin/bash -xe
             export DEBIAN_FRONTEND=noninteractive
-            apt update
-            apt upgrade -y
+            #confirmed live: apt update's own index fetch can transiently fail (regional mirror briefly out
+            #of sync) - a few retries with backoff instead of failing the whole bootstrap over one blip
+            apt update || (sleep 5 && apt update) || (sleep 15 && apt update)
+            #best-effort, not fatal: confirmed live, a routine OS security patch can 404 (security.ubuntu.com
+            #listing a .deb the regional mirror hasn't caught up with yet) - none of this is required for the
+            #game server itself to run, so don't burn the full CreationPolicy timeout over it. This can't be
+            #fixed by moving the cfn-signal trap earlier either - cfn-signal itself isn't installed until
+            #after this point (see pip3 install below), so a failure here still can't self-report either way.
+            apt upgrade -y || echo "apt upgrade failed - continuing, not required for the game server itself"
             apt install -y python3-pip
             pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
             trap 'cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}' EXIT
@@ -361,6 +380,7 @@ Resources:
             echo ${GameName} > /etc/game-server-manager/statusKey.txt
             echo ${DataVolumeId} > /etc/game-server-manager/dataVolumeId.txt
             echo "${GameServerCompanionSha256}" > /etc/game-server-manager/companionSha256.txt
+            echo "${GameVersion}" > /etc/game-server-manager/gameVersion.txt
             mkdir -p /usr/games/install
             cd /usr/games/install
             wget -O gameserverinstall.sh ${GameServer}
@@ -372,6 +392,7 @@ Resources:
             DataVolumeId: !Ref GameDataVolume
             GameServerSha256: !Ref GameServerSha256
             GameServerCompanionSha256: !Ref GameServerCompanionSha256
+            GameVersion: !Ref GameVersion
 
   GameDataVolume:
     Type: AWS::EC2::Volume

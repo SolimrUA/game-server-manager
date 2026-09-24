@@ -15,7 +15,6 @@ import zipfile
 DATA_PATH = "/home/vintagestory/data"
 MODS_PATH = os.path.join(DATA_PATH, "Mods")
 CONFIG_PATH = os.path.join(DATA_PATH, "serverconfig.json")
-VERSION_FILE = "/home/vintagestory/version.txt"
 STATE_FILE = "/home/vintagestory/.status_last_hash"
 STATUS_TMP_FILE = "/tmp/status_push.json"
 SERVER_SH = "/home/vintagestory/server/server.sh"
@@ -32,13 +31,22 @@ with open("/etc/game-server-manager/statusKey.txt") as f:
 
 #matches /stats output, e.g. "Players online: 1 / 16 (Solimr [69ms])" - verified against a live server
 PLAYERS_ONLINE_RE = re.compile(r"Players online:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+#matches /stats' own "24.9.2026 14:44:41 [Notification] Version: 1.22.7" line - verified against a live
+#server. Reading the version straight from the running game's own console output, instead of a static file
+#written once at install time, means it's always accurate to what's actually running rather than whatever
+#was true the last time this long-lived agent process itself (re)started - a real bug found live: an
+#in-place update (Lambda's updateGame) restarts the game process directly, not this systemd service, so a
+#file-based version went stale across every update until the agent itself happened to restart too.
+VERSION_RE = re.compile(r"Version:\s*(\S+)", re.IGNORECASE)
 
 
 def read_service_status():
     #systemd only sees server.sh's own process, not the game process it detaches into a screen session -
     #so `systemctl is-active` would just reflect whether server.sh's brief startup run succeeded, not
     #whether the actual game is still up. Checking for the game process directly is what server.sh itself
-    #does before accepting any command, so it's the accurate signal.
+    #does before accepting any command, so it's the accurate signal. Deliberately just "is the OS process
+    #there" - see read_stats() below for the finer-grained "is the game actually responding yet" check
+    #main() layers on top of this.
     try:
         result = subprocess.run(["pgrep", "-f", PGREP_PATTERN], capture_output=True)
         return "active" if result.returncode == 0 else "inactive"
@@ -56,9 +64,19 @@ def send_console_command(command):
         return ""
 
 
-def read_current_players():
-    match = PLAYERS_ONLINE_RE.search(send_console_command("stats"))
-    return int(match.group(1)) if match else None
+def read_stats():
+    #one /stats call covers both player count and live version - previously two separate concerns (this
+    #used to be player-count-only, with version coming from a separate file). If the OS process is up but
+    #the game hasn't finished loading yet, /stats prints just "process found ... executing command" / "is
+    #up and running" with none of the actual stats block (confirmed live) - version_match stays None in
+    #that case, which main() uses as the signal to report "activating" rather than "active".
+    output = send_console_command("stats")
+    players_match = PLAYERS_ONLINE_RE.search(output)
+    version_match = VERSION_RE.search(output)
+    return {
+        "current_players": int(players_match.group(1)) if players_match else None,
+        "version": version_match.group(1) if version_match else None,
+    }
 
 
 def read_max_players():
@@ -103,14 +121,6 @@ def read_last_save_time():
         return None
 
 
-def read_version():
-    try:
-        with open(VERSION_FILE) as f:
-            return f.read().strip()
-    except Exception:
-        return None
-
-
 def read_mod_info(read_fn):
     try:
         info = json.loads(read_fn())
@@ -150,21 +160,30 @@ def push_status(status):
 
 
 def main():
-    version = read_version()
     last_hash = None
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f:
             last_hash = f.read().strip()
 
     while True:
-        service_status = read_service_status()
+        process_status = read_service_status()
+        if process_status == "active":
+            stats = read_stats()
+            #process is up but the console isn't answering meaningfully yet (still loading the world) -
+            #"activating" is one of the states docs/server-status.md already documents for exactly this
+            #"EC2/process running, game not actually ready" case, previously unused by this agent
+            service_status = "active" if stats["version"] is not None else "activating"
+        else:
+            stats = {"current_players": None, "version": None}
+            service_status = process_status
+
         status = {
             "gameName": "vintagestory",
             "serverName": read_server_name(),
-            "version": version,
+            "version": stats["version"],
             "serviceStatus": service_status,
             "players": {
-                "current": read_current_players() if service_status == "active" else None,
+                "current": stats["current_players"],
                 "max": read_max_players(),
             },
             "mods": read_mods(),

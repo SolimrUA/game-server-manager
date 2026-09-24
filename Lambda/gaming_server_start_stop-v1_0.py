@@ -669,10 +669,9 @@ sudo chmod +x /home/vintagestory/server/VintagestoryServer /home/vintagestory/se
 #install.sh applies on first install, or the update silently points the server back at the wrong data path
 sudo sed -i "s|^DATAPATH='/var/vintagestory/data'|DATAPATH='__DATAPATH__'|" /home/vintagestory/server/server.sh
 
-#status_agent.py's read_version() reports GameStatus.version straight from this file - leaving it stale
-#would make the update invisible to the UI even though it actually worked
-echo "$VERSION" | sudo -u vintagestory tee /home/vintagestory/version.txt > /dev/null
-
+#no separate version file to update here anymore - status_agent.py now reads the running game's own
+#/stats console output for its reported version, so it picks up the new version live once the game finishes
+#starting back up, with no risk of going stale the way a static file did
 sudo -u vintagestory /home/vintagestory/server/server.sh start
 echo "Update complete: $VERSION"
 '''
