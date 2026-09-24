@@ -5,3 +5,4 @@ CdkAssetPublisher/cdk-asset-publisher
 *.pyc
 FrontEnd/js/index.js
 docs/*requirements.md
+CLAUDE.md

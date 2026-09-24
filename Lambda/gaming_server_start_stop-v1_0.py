@@ -268,6 +268,22 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             print("restartGame failed: "+str(e))
             statusmessage = "Couldn't restart the game, please try again later"
         return (statusmessage, info)
+    elif event['command'] == "updateGame":
+        #updates the game server software itself, not the EC2 instance. Both games' update mechanism
+        #already restarts the game as part of doing so - no separate restartGame call needed after this.
+        if not targetInstances:
+            return ("No matching instance found", info)
+        i = targetInstances[0]
+        gameName = i.get('GameName')
+        dataPath = i.get('DataPath')
+        if not gameName or not dataPath:
+            return ("Missing instance", info)
+        try:
+            statusmessage = updateGame(i['InstanceId'], gameName, dataPath)
+        except Exception as e:
+            print("updateGame failed: "+str(e))
+            statusmessage = "Couldn't update the game, please try again later"
+        return (statusmessage, info)
     else:
         statusmessage = "Error - invalid invocation event received"
     return(statusmessage,info)
@@ -603,6 +619,89 @@ def restartGame(instanceId, gameName, dataPath):
     if success:
         return "Restart requested - the server will be back in a minute or two"
     return "Couldn't restart the game: "+(stderr or stdout or "unknown error")[:300]
+
+#Vintage Story's own server.sh `update` subcommand turned out to be a permanently disabled stub (confirmed
+#live via its source: it just prints manual instructions and exits 0 - "Auto update is disabled because
+#unreliable") rather than a real update mechanism, unlike restart/moddb. Those printed instructions are
+#close to what scripts/VintageStory/install.sh itself already does for a fresh install (stop, wget the
+#tarball, extract, chmod, patch DATAPATH, restart) - this reimplements that same sequence for an in-place
+#update, resolving the target version live from the game's own public gameversions API instead of a
+#hardcoded VSVERSION pin. Written to a script file on the instance rather than inlined into the SSM command
+#text (like the mod scripts) since it's long and multi-step; output goes to a log file rather than
+#/dev/null so a failure partway through is actually diagnosable.
+VS_UPDATE_SCRIPT = r'''#!/bin/bash
+set -e
+
+#jq is already installed (see install.sh's apt line) - filters out pre-release tags like "1.4.4-dev.2" the
+#same way docs/frontend-ui-ux-requirements.md's own research flagged, taking the newest stable entry
+VERSION=$(curl -fsS https://mods.vintagestory.at/api/gameversions | jq -r '[.gameversions[].name | select(contains("-") | not)] | last')
+if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+  echo "Couldn't determine the latest available version" >&2
+  exit 1
+fi
+echo "Updating Vintage Story server to $VERSION"
+
+sudo -u vintagestory /home/vintagestory/server/server.sh stop
+
+#confirmed live: extracting straight over an existing install leaves old and new asset files mixed
+#together, and the game refuses to start as a safety check ("Your Server installation still contains old
+#files from a previous game version... Please fully delete the /assets folder and then do a full
+#reinstallation") - this is exactly what the disabled vs_update stub's own instructions said to do (rm -rf
+#*) that got missed on the first version of this script. /home/vintagestory/server only ever holds the
+#ephemeral game binary (same as install.sh's own fresh-install comment notes) - DataPath is a separate
+#top-level directory, never nested under here, so wiping this is safe
+sudo rm -rf /home/vintagestory/server/*
+
+cd /tmp
+sudo wget -O vs_server_update.tar.gz "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VERSION}.tar.gz"
+sudo tar -C /home/vintagestory/server -xzf vs_server_update.tar.gz
+#confirmed live: the tarball's owned by root (sudo wget), so a plain rm -f here fails with "Operation not
+#permitted" - harmless (just a stray file left in /tmp), but sudo is the actual fix
+sudo rm -f vs_server_update.tar.gz
+
+#scoped to server/ only, not all of /home/vintagestory like install.sh's own chown -R (fine there since the
+#data volume isn't populated yet at first install) - an in-place update must not touch the persistent
+#world-save data under DataPath
+sudo chown -R vintagestory:vintagestory /home/vintagestory/server
+sudo chmod +x /home/vintagestory/server/VintagestoryServer /home/vintagestory/server/server.sh
+
+#the freshly-extracted server.sh ships install.sh's same shared-default DATAPATH - reapply the same patch
+#install.sh applies on first install, or the update silently points the server back at the wrong data path
+sudo sed -i "s|^DATAPATH='/var/vintagestory/data'|DATAPATH='__DATAPATH__'|" /home/vintagestory/server/server.sh
+
+#status_agent.py's read_version() reports GameStatus.version straight from this file - leaving it stale
+#would make the update invisible to the UI even though it actually worked
+echo "$VERSION" | sudo -u vintagestory tee /home/vintagestory/version.txt > /dev/null
+
+sudo -u vintagestory /home/vintagestory/server/server.sh start
+echo "Update complete: $VERSION"
+'''
+
+def updateGame(instanceId, gameName, dataPath):
+    #see VS_UPDATE_SCRIPT above for why this isn't just "run server.sh update". Backgrounded (setsid) like
+    #restartGame since downloading+extracting a new version can take a while and this SSM call should stay
+    #fast regardless - but unlike restartGame, output goes to a log file (/tmp/vs-update.log) rather than
+    #/dev/null, since this is a much more involved sequence with real failure points (network, disk, the
+    #version API's shape) worth being able to actually diagnose after the fact.
+    if gameName == 'vintagestory':
+        script = VS_UPDATE_SCRIPT.replace('__DATAPATH__', dataPath)
+        commands = [
+            #quoted heredoc delimiter (<<'VSUPDATEEOF') is required here - without it bash would expand
+            #$VERSION/${VERSION} etc. while WRITING the file, instead of leaving them for vs-update.sh's
+            #own execution later. Same closing-terminator-on-its-own-line requirement noted in
+            #VS_MOD_FIND_MODID_SCRIPT's caller applies here too.
+            'cat > /tmp/vs-update.sh <<\'VSUPDATEEOF\'\n' + script + '\nVSUPDATEEOF\n',
+            'chmod +x /tmp/vs-update.sh',
+            'setsid /tmp/vs-update.sh </dev/null >/tmp/vs-update.log 2>&1 &',
+        ]
+    else:
+        return "Update isn't supported for "+str(gameName)+" yet"
+    print("updateGame: instanceId="+instanceId+" gameName="+gameName)
+    success, stdout, stderr = runSsmCommandSync(instanceId, commands)
+    print("updateGame result: success="+str(success)+" stdout="+repr(stdout)+" stderr="+repr(stderr))
+    if success:
+        return "Update requested - the server will be back in a few minutes once it's downloaded and restarted (check /tmp/vs-update.log on the instance if it doesn't come back)"
+    return "Couldn't update the game: "+(stderr or stdout or "unknown error")[:300]
 
 #docker-compose.yml's MODS value is a YAML block scalar (see valheim-prepare-data.sh in
 #scripts/Valheim/install.sh) - its first line carries the "MODS=" prefix, every following line at the

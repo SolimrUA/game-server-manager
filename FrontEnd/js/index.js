@@ -137,6 +137,16 @@ function mcRestartGameButtonHtml(enabled) {
   return '<button type="button" class="btn mcRestartGameBtn"' + (enabled ? '' : ' disabled') + ' title="' + title + '">Restart Game</button>';
 }
 
+// NOTE: updategame doesn't exist on the back end yet - see docs/frontend-ui-ux-requirements.md's
+// "Update the game" section. Admin-only, same bucket as Restart Game/Resize/Backup Now, and disabled while
+// the instance isn't running for the same reason (needs SSM Run Command against the instance). Updating
+// already restarts the game as part of what it does on both games, so this is a peer of Restart Game, not
+// something that needs a separate restart afterward.
+function mcUpdateGameButtonHtml(enabled) {
+  var title = enabled ? 'Update the game server software to the latest version' : 'Start the server to update the game';
+  return '<button type="button" class="btn mcUpdateGameBtn"' + (enabled ? '' : ' disabled') + ' title="' + title + '">Update Game</button>';
+}
+
 // `scope` is 'full' (world save + mods + player data - everything WorldDownloadPaths lists) or 'core'
 // (world save only). Only one download can run at a time per instance either way - the SSM command zips
 // to a fixed /tmp path on the instance, so a second one while the first is still running would collide -
@@ -368,7 +378,8 @@ async function renderTable(data) {
               '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '') +
             // Restarts the game process, not EC2 power state - Data rather than Power since it's grouped
             // with the other "acts on the server's live content/state" actions, not instance lifecycle.
-            (mcIsAdmin ? mcRestartGameButtonHtml(modsRunning) : '')) : '') +
+            // Update Game sits right next to it for the same reason.
+            (mcIsAdmin ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
         (mcIsAdmin ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
@@ -448,10 +459,6 @@ async function renderTable(data) {
       var modRefInput = detailRow.querySelector('.mcModRefInput');
       if (modRefInput && instanceId === previouslySelectedInstanceId && previouslyModRefValue) {
         modRefInput.value = previouslyModRefValue;
-        if (previouslyModRefFocused) {
-          modRefInput.focus();
-          modRefInput.setSelectionRange(modRefInput.value.length, modRefInput.value.length);
-        }
       }
       var installModBtn = detailRow.querySelector('.mcInstallModBtn');
       if (installModBtn && !installModBtn.disabled) installModBtn.onclick = function (e) {
@@ -472,7 +479,7 @@ async function renderTable(data) {
         };
       });
 
-      // Appears both in the Power cluster and again in the Mods tab (see mcRestartGameButtonHtml) -
+      // Appears both in the Data cluster and again in the Mods tab (see mcRestartGameButtonHtml) -
       // clicking either does the same thing.
       detailRow.querySelectorAll('.mcRestartGameBtn').forEach(function (btn) {
         if (btn.disabled) return;
@@ -483,6 +490,14 @@ async function renderTable(data) {
         };
       });
 
+      var updateGameBtn = detailRow.querySelector('.mcUpdateGameBtn');
+      if (updateGameBtn && !updateGameBtn.disabled) updateGameBtn.onclick = function (e) {
+        e.stopPropagation();
+        if (!window.confirm('Update ' + mcGameDisplayName(instance['GameName']) + ' to the latest version? This briefly restarts the game.')) return;
+        showAlert('Updating the game…');
+        updateGame(instanceId);
+      };
+
       detailRow.onclick = function (e) { e.stopPropagation(); };
 
       tbody.appendChild(row);
@@ -491,6 +506,13 @@ async function renderTable(data) {
       if (previouslySelectedInstanceId && previouslySelectedInstanceId === row.dataset.instanceId) {
         row.classList.add('selected');
         detailRow.classList.remove('hidden');
+      }
+
+      // Must happen after the appendChild calls above - .focus() is a silent no-op on a node that isn't
+      // attached to the document yet, which is exactly what modRefInput still was right after creation.
+      if (modRefInput && previouslyModRefFocused && instanceId === previouslySelectedInstanceId) {
+        modRefInput.focus();
+        modRefInput.setSelectionRange(modRefInput.value.length, modRefInput.value.length);
       }
 
       // Async DNS-vs-actual-IP check; updates the dot without blocking the initial render
@@ -673,6 +695,30 @@ async function deleteMod(instanceId, modName) {
 // Lambda/gaming_server_start_stop-v1_0.py.
 async function restartGame(instanceId) {
   var url = API_URL + "restartgame/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "");
+  var jwt = await getJwt();
+
+  var msg = await fetch(url, {
+    method: 'get',
+    headers: new Headers({
+      'Authorization': jwt
+    })
+  });
+
+  var msgdata = await msg.json();
+  showAlert(msgdata[0]);
+
+  for (y=0; y<6; y++){
+    await sleep(1000);
+    mcInfo(API_URL, jwt);
+  }
+}
+
+// NOTE: updategame doesn't exist on the back end yet - see docs/frontend-ui-ux-requirements.md's
+// "Update the game" section. Updates the game server software itself (not the EC2 instance, not a mod) to
+// the latest version, which on both games already restarts the game as part of doing so - no separate
+// restartGame call needed after this one succeeds.
+async function updateGame(instanceId) {
+  var url = API_URL + "updategame/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "");
   var jwt = await getJwt();
 
   var msg = await fetch(url, {
