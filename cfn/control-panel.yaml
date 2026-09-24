@@ -121,31 +121,15 @@ Resources:
       RestApiId: !Ref ControlApi
       Type: COGNITO_USER_POOLS
 
-  #Confirmed live, twice: adding/changing methods or resources elsewhere in the API does NOT publish them
-  #to the "prod" stage on its own - CloudFormation only republishes when this resource is actually
-  #replaced (changing a property like Description isn't enough - it just patches the existing deployment's
-  #metadata in place, still serving the stale snapshot). The reliable way to force a genuinely new
-  #deployment is bumping THIS RESOURCE'S OWN LOGICAL ID (currently Rev10) - that makes CloudFormation create
-  #a new resource rather than update the existing one. Next endpoint change: rename this to
-  #ControlApiDeploymentRev11, and so on, AND add its GET method to DependsOn below.
+  #Adding, renaming or re-integrating a method elsewhere in this API does not publish it to the "prod"
+  #stage: CloudFormation republishes only when this resource is genuinely REPLACED, and editing one of
+  #its properties just patches the existing deployment in place, still serving the stale snapshot.
   #
-  #Second bug, found after the first "fix": DependsOn previously listed only ApiGetInfoGetMethod. With no
-  #dependency on the OTHER GET methods, CloudFormation has no guarantee it finishes creating them before
-  #snapshotting this deployment - for methods created in the very same update as a Deployment replacement,
-  #that race is real (confirmed live: new endpoints 403'd with "Missing Authentication Token" - API
-  #Gateway's way of saying the method genuinely isn't in the deployed snapshot - even though the resource
-  #existed and OPTIONS on it worked). Depending on every GET method closes that race for good.
-  #
-  #Rev5: renamed the backup-trigger endpoint back from saveworld to backupnow (see git history) - a path
-  #rename is exactly the kind of change that needs this bump, same as adding a new endpoint does; renaming
-  #a DependsOn entry's VALUE alone does not make CloudFormation replace this resource on its own.
-  #Rev6: added pauseidleshutdown/resumeidleshutdown.
-  #Rev7: added the cognito:groups claim passthrough (two-tier admin/users access control) to every GET
-  #method's RequestTemplates - no new endpoints, but changing an existing method's Integration still needs
-  #this bump per the rule above.
-  #Rev8: added installmod/deletemod.
-  #Rev9: added restartgame.
-  #Rev10: added updategame.
+  #So every change to any method or resource in this API needs two things here: bump this resource's own
+  #LOGICAL ID (ControlApiDeploymentRev10 -> Rev11, which is what forces the replacement), and list that
+  #method in DependsOn below. DependsOn must name every GET method, not just one: for methods created in
+  #the same update that replaces this deployment, CloudFormation is otherwise free to snapshot before
+  #they exist, and the missing endpoints answer 403 "Missing Authentication Token".
   ControlApiDeploymentRev10:
     DependsOn:
       - ApiGetInfoGetMethod
@@ -1796,11 +1780,9 @@ Resources:
       PackageType: Zip
       Role: !GetAtt StartStopLambdaIamRole.Arn
       Runtime: python3.8
-      #bumped from 10 for installMod/deleteMod's synchronous SSM wait (ssm.get_waiter('command_executed'))
-      #- the actual work (console command injection / file edit) is fast, but the waiter's own polling
-      #granularity plus normal SSM round-trip latency needs a bit more headroom. Kept under the 15000ms
-      #API Gateway integration timeout on every method so the Lambda's own timeout is what reports
-      #cleanly, not a generic API Gateway 504.
+      #Sized for installMod/deleteMod's synchronous SSM wait: the work itself is fast, but SSM's polling
+      #granularity and round-trip latency need headroom. Kept under the 15000ms API Gateway integration
+      #timeout, so a timeout surfaces as this Lambda's own error rather than a generic 504.
       Timeout: 13
 
   UpdateDnsLambda:

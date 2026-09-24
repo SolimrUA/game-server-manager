@@ -2,67 +2,48 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-#fail loudly on any error - without this, a failing command here (e.g. an apt package that doesn't
-#exist) just gets skipped over, and the outer UserData wrapper's cfn-signal reports success regardless,
-#since it only sees this script's own exit code.
+#Without this the outer UserData's cfn-signal reports success anyway, since it only sees this script's
+#own exit code.
 set -euo pipefail
 
-#the server stack's UserData invokes this as `./install.sh "$GameServer"` so we know our own source URL and
-#can fetch sibling files (status_agent.py) from the same location, whether that's raw.githubusercontent.com
-#or a published S3 copy.
+#UserData passes this script's own source URL, so sibling files can be fetched from wherever this copy
+#was served from.
 INSTALLSCRIPTURL="$1"
 BASEURL="${INSTALLSCRIPTURL%/*}"
 
-#stops apt from popping an interactive dialog (e.g. a pending-kernel-upgrade notice) that would otherwise
-#hang forever waiting for a terminal that isn't there. Not using sudo here since sudo resets the
-#environment by default and would drop this - this whole script already runs as root anyway.
+#Without this apt opens dialogs that hang forever waiting for a terminal there isn't one of. Set
+#directly rather than through sudo, which resets the environment; this already runs as root.
 export DEBIAN_FRONTEND=noninteractive
 
-#confirmed live: this duplicates the outer UserData's own apt update/upgrade (cfn/server-stack.yaml), but
-#that copy runs before this script is even fetched, so its result isn't visible here - keeping a second
-#pass is deliberate defense in depth. Same retry/non-fatal treatment as the outer copy, for the same
-#reason: a transient regional-mirror desync (a specific .deb 404ing before the mirror catches up with
-#security.ubuntu.com's index) shouldn't abort the whole install under this script's own `set -e`, and
-#routine OS upgrades aren't required for the game server itself to run.
+#Non-fatal: a transient mirror desync (a .deb 404ing before the mirror catches up with the index)
+#shouldn't abort the install under `set -e`, and OS upgrades aren't required for the game to run.
 apt update || (sleep 5 && apt update) || (sleep 15 && apt update)
 apt upgrade -y || echo "apt upgrade failed - continuing, not required for the game server itself"
-#unlike apt upgrade, these specific packages ARE required (wget/curl for downloads, jq for JSON parsing
-#elsewhere, python3 for status_agent.py, screen for the detached game session, etc.) - retry instead of
-#tolerating failure outright
 sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps \
   || (sleep 5 && sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps) \
   || (sleep 15 && sudo apt install -y wget curl tar unzip zip jq apt-transport-https ca-certificates gnupg lsb-release python3 screen procps)
 
-#Canonical's AMI ships the SSM Agent pre-installed and auto-started - this is just cheap insurance for the
-#rare AMI variant where it's present but not running. Needed for the Control Panel's "Download Backup"
-#feature (AWS Systems Manager Run Command). No-op if it's already running.
+#Canonical's AMI ships the SSM Agent started already; this covers the rare variant where it isn't.
 sudo snap start amazon-ssm-agent 2>/dev/null || true
 
-#install AWS CLI
 sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 sudo unzip -o awscliv2.zip
 sudo ./aws/install
 
-#install the .NET runtime required by the Vintage Story dedicated server, via Microsoft's official installer
-#rather than the apt feed - Ubuntu's dotnet-runtime apt packages lag behind current .NET releases, so the
-#exact version this needs may not be available there. Must match whatever VSVERSION below actually requires
-#(check with `./VintagestoryServer` if a newer VSVERSION starts refusing to launch).
+#From Microsoft's installer rather than apt, whose dotnet-runtime packages lag behind the releases the
+#game needs. The channel has to match what VSVERSION requires.
 curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
 chmod +x /tmp/dotnet-install.sh
 sudo /tmp/dotnet-install.sh --runtime dotnet --channel 10.0 --install-dir /usr/share/dotnet
 
-#the game's own server.sh checks for a `dotnet` command on PATH (`dotnet --list-runtimes`) rather than
-#checking the runtime files directly, which a bare --install-dir install doesn't provide on its own
+#server.sh looks for `dotnet` on PATH, which a bare --install-dir install doesn't provide.
 sudo ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
 
-#get stackname created by user data script and update SSM parameter name with this to make it unique.
-#Read from /etc/game-server-manager, not /tmp: /tmp is cleared on every reboot on this AMI (tmpfs), and
-#this same value gets re-read later by vintagestory-prepare-data.sh, which can run after a reboot too.
+#/etc/game-server-manager, not /tmp, which this AMI clears on every reboot - vintagestory-prepare-data.sh
+#re-reads these values and can run after one.
 STACKNAME=$(</etc/game-server-manager/paramName.txt)
 PARAMNAME=game-password-$STACKNAME
 
-#reuse the join password across reinstalls of this same stack instead of minting a new one every time;
-#only generate and store one the first time this server is ever set up
 if VSPW=$(aws ssm get-parameter --name "$PARAMNAME" --with-decryption --query Parameter.Value --output text 2>/dev/null); then
   echo "Reusing existing join password from $PARAMNAME"
 else
@@ -70,15 +51,9 @@ else
   aws ssm put-parameter --name "$PARAMNAME" --value "$VSPW" --type "SecureString" --overwrite
 fi
 
-#version to install - a CFN GameVersion parameter (see cfn/server-stack.yaml), written by UserData before
-#this script runs. Deliberately no silent fallback to some hardcoded default here: that's exactly what
-#caused a live instance to silently revert from 1.22.7 to an old pinned version after a CreateInstance
-#cycle, undoing a real update without any clear signal that it happened. Failing loudly instead - this
-#script runs under the caller's `bash -xe` with a `trap ... EXIT` that reports failure back via
-#cfn-signal, so a missing GameVersion surfaces as a failed CloudFormation stack operation, not a
-#silently-wrong install. GameVersion itself stays optional at the CFN parameter level (Default: '') since
-#not every game honors it (e.g. Valheim auto-updates on its own) - the requirement is enforced here,
-#specific to Vintage Story.
+#Required, with no fallback to a hardcoded default: a default would silently revert an updated server to
+#an old version on the next CreateInstance cycle. Failing here surfaces as a failed stack operation via
+#the caller's cfn-signal trap.
 VSVERSION=$(cat /etc/game-server-manager/gameVersion.txt 2>/dev/null)
 if [ -z "$VSVERSION" ]; then
   echo "GameVersion is required for Vintage Story - set it in the server stack's CloudFormation parameters (e.g. 1.22.7). See https://account.vintagestory.at/downloads for available versions." >&2
@@ -87,35 +62,25 @@ fi
 VSPORT=42420
 VSNAME=" "
 
-#create a dedicated, unprivileged user to run the server under. Add the default ubuntu login user to its
-#group so you can actually browse/inspect the install over SSH without sudo for every command - server.sh
-#itself already special-cases a caller that shares this group (see GROUPNAME in as_user()). The data
-#directory itself isn't created here - it's a mount point, created by the data-prepare script below once
-#the persistent volume actually attaches.
+#ubuntu joins the group so the install can be inspected over SSH without sudo for every command;
+#server.sh special-cases a caller sharing it. The data directory is a mount point, created below.
 id -u vintagestory &>/dev/null || sudo useradd vintagestory -m
 sudo usermod -aG vintagestory ubuntu
 sudo mkdir -p /home/vintagestory/server
 
-#download and unpack the dedicated server - this also gives us server.sh, the game's own launcher script.
-#This is ephemeral (redownloaded fresh on every new instance, unlike the persistent data volume), which is
-#fine - it's the game binary, not anything a player created.
+#Ephemeral, unlike the data volume: redownloaded on every new instance, since it's only the game binary.
 cd /tmp
 sudo wget -O vs_server.tar.gz "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VSVERSION}.tar.gz"
 sudo tar -C /home/vintagestory/server -xzf vs_server.tar.gz
 sudo chown -R vintagestory:vintagestory /home/vintagestory
 sudo chmod +x /home/vintagestory/server/VintagestoryServer /home/vintagestory/server/server.sh
 
-#server.sh defaults to a shared /var/vintagestory/data path (meant for one server per box); point it at
-#the same per-instance data path everything else here already uses
+#server.sh defaults to a shared /var/vintagestory/data; point it at this instance's data path.
 sudo sed -i "s|^DATAPATH='/var/vintagestory/data'|DATAPATH='/home/vintagestory/data'|" /home/vintagestory/server/server.sh
 
-#The persistent data volume (world save, mods, serverconfig.json) is a separate EC2 resource from this
-#instance, attached by CloudFormation only after this whole setup script finishes and signals success -
-#that's deliberate, so a broken setup script fails fast without ever touching game data, and so the
-#instance never blocks its own creation waiting on storage. Once CloudFormation actually attaches the
-#volume, systemd's own built-in udev integration notices the new block device and starts the service
-#below automatically - no custom udev rule needed, just a unit that names the device by its stable by-id
-#path (NVMe device names like /dev/nvme1n1 aren't predictable on these Nitro instances, but this path is).
+#The data volume is attached only after this script signals success, so a broken install fails fast
+#without touching game data. systemd's udev integration starts the service below when the device
+#appears, named by its by-id path since NVMe names like /dev/nvme1n1 aren't predictable on Nitro.
 DATA_VOLUME_ID=$(</etc/game-server-manager/dataVolumeId.txt)
 VOLUME_ID_NO_DASH="${DATA_VOLUME_ID//-/}"
 DEVICE_PATH="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${VOLUME_ID_NO_DASH}"
@@ -141,19 +106,14 @@ fi
 mkdir -p "$MOUNT_POINT"
 grep -q "^LABEL=${LABEL} " /etc/fstab || echo "LABEL=${LABEL} ${MOUNT_POINT} ext4 defaults,nofail 0 2" >> /etc/fstab
 systemctl daemon-reload
-#on a fresh volume this is the only thing that mounts it. On a reused one, systemd's own fstab-generated
-#mount unit may already have raced ahead and mounted it during normal boot (the fstab entry above was
-#written by a previous run of this same script) - `mount` would then fail with "already mounted", so only
-#call it if the path isn't live yet.
+#On a fresh volume this is the only thing that mounts it. On a reused one, systemd's fstab-generated
+#mount unit may have got there first during boot, and `mount` would fail with "already mounted".
 mountpoint -q "$MOUNT_POINT" || mount "$MOUNT_POINT"
 chown -R vintagestory:vintagestory /home/vintagestory
 
 if [ ! -f "$MOUNT_POINT/serverconfig.json" ]; then
   echo "No serverconfig.json on this volume yet - bootstrapping a fresh one"
-  #running the server once (and letting it time out) makes it write the default serverconfig.json,
-  #which we then patch with our own port/name/password/visibility settings before the real start.
-  #Only happens for a genuinely fresh volume - a reused one keeps whatever config it already has,
-  #including any manual edits, untouched.
+  #Running the server once and letting it time out is what writes a default serverconfig.json to patch.
   sudo -u vintagestory timeout 30 /home/vintagestory/server/VintagestoryServer --dataPath "$MOUNT_POINT" || true
 
   VSPW=$(aws ssm get-parameter --name "game-password-$(cat /etc/game-server-manager/paramName.txt)" --with-decryption --query Parameter.Value --output text)
@@ -166,22 +126,13 @@ if [ ! -f "$MOUNT_POINT/serverconfig.json" ]; then
   sudo -u vintagestory mv /tmp/serverconfig.json.tmp "$MOUNT_POINT/serverconfig.json"
 fi
 
-#`systemctl enable` alone only arranges for these to start on a FUTURE boot - it doesn't retroactively
-#start them now just because multi-user.target was already reached earlier in this same boot (which it
-#was, well before this device-triggered script got a chance to run and enable them). Every install used to
-#get away without this because the instance auto-shut-down ~2 minutes after install and got manually
-#restarted from the control panel - a genuine second boot, by which point these units already existed and
-#WantedBy=multi-user.target correctly picked them up. Removing that auto-shutdown (idle-shutdown redesign)
-#silently exposed this - confirmed live on Valheim's equivalent services: a fresh install left them
-#"enabled" but "inactive (dead)" indefinitely. Starting them explicitly here, once the data they depend on
-#is actually ready, is what makes a fresh install actually come up working without needing a reboot or
-#manual nudge.
+#`systemctl enable` only arranges a start on a future boot; multi-user.target was reached long before
+#this device-triggered script ran, so without an explicit start a fresh install sits "enabled" but
+#"inactive (dead)" until something reboots it. Start them here, where the data they need is ready.
 #
-#--no-block is required, not optional: vintagestory.service has After=vintagestory-data.service, and this
-#script IS vintagestory-data.service's own ExecStart - a plain (blocking) `systemctl start` here waits for
-#vintagestory.service's ordering dependency on vintagestory-data.service to clear, which can't happen until
-#THIS script returns. Confirmed live on Valheim's equivalent unit: without --no-block, the calling service
-#hangs in "activating" forever, deadlocked against itself.
+#--no-block is required: vintagestory.service is ordered After=vintagestory-data.service, and this script
+#is that service's own ExecStart. A blocking start waits on an ordering dependency that can't clear until
+#this script returns, leaving the calling service deadlocked in "activating".
 systemctl start --no-block vintagestory.service
 systemctl start --no-block vintagestory-status-agent.service
 PREPARE_SCRIPT
@@ -205,22 +156,18 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory-data.service
 
-#systemd unit so the server starts once its data is actually mounted (and again on any future boot, or
-#restart). Runs through server.sh (the game's own launcher) rather than the raw binary, since server.sh
-#runs the game inside a detached `screen` session - that's also what makes it possible to send the server
-#console commands later (e.g. status_agent.py querying player counts) via `screen -X stuff`, which the raw
-#binary has no equivalent for. server.sh does its own privilege drop to the vintagestory user internally
-#(via su), so this runs as root.
+#Starts the server once its data is mounted, and on every later boot. Goes through server.sh rather than
+#the raw binary because server.sh runs the game inside a detached `screen` session, which is also what
+#lets status_agent.py send it console commands later. server.sh drops privileges to the vintagestory
+#user itself, so this unit runs as root.
 #
 #RequiresMountsFor, not a hardcoded ordering on vintagestory-data.service: this is what lets systemd defer
 #starting the game until the mount is genuinely live, however long that takes (the volume attaches well
 #after this setup script finishes, via CloudFormation, completely decoupled from this boot).
 #
-#Type=oneshot + RemainAfterExit, not Type=forking: the actual game process ends up living inside a
-#screen session, not as a traceable child of this unit, so systemd's forking-mode heuristics can't find
-#it - it concludes the service didn't start and immediately stops what it just started. oneshot sidesteps
-#that entirely: run the start command once, consider the unit "active" regardless, run the stop command
-#on shutdown. status_agent.py's own pgrep-based liveness check is what actually knows if the game is up.
+#Type=oneshot + RemainAfterExit rather than Type=forking: the game lives inside a screen session, not as
+#a traceable child of this unit, so forking mode concludes the service never started and stops it again.
+#status_agent.py's pgrep-based check is what actually knows whether the game is up.
 sudo bash -c 'cat > /etc/systemd/system/vintagestory.service' <<EOF
 [Unit]
 Description=Vintage Story Dedicated Server
@@ -242,8 +189,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory
 
-#status agent - see docs/server-status.md and status_agent.py for details. Fetched from alongside this
-#install script so it tracks whichever copy (fork or published S3 assets) served install.sh itself.
+#Fetched from alongside this script, so it always matches the copy that served install.sh.
 sudo wget -O /home/vintagestory/status_agent.py "${BASEURL}/status_agent.py"
 COMPANION_SHA256=$(</etc/game-server-manager/companionSha256.txt)
 if [ -n "$COMPANION_SHA256" ]; then

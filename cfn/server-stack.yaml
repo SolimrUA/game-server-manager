@@ -198,11 +198,10 @@ Parameters:
     Type: String
   GameVersion:
     Description: >-
-      Exact game server version to install (e.g. 1.22.7 for Vintage Story) - a CreateInstance cycle always
-      does a fresh install from scratch, so without this the version came from a hardcoded default baked
-      into that game's install script, silently reverting any in-place "Update Game" you'd done on a
-      previous instance. Leave blank to use that script's own built-in default. Meaning is game-specific -
-      not every cartridge script honors this (e.g. Valheim already auto-updates on its own schedule).
+      Exact game server version to install (e.g. 1.22.7 for Vintage Story). A CreateInstance cycle always
+      installs from scratch, so set this to whatever the server is actually running, or a fresh instance
+      comes back on the install script's own default version instead. Leave blank to accept that default.
+      Game-specific - not every cartridge script honors it (Valheim auto-updates on its own schedule).
     Default: ''
     Type: String
   DataPath:
@@ -274,7 +273,7 @@ Parameters:
     Description: Domain name you will use to access your server (e.g. mygameserver.link).  This is optional however without it you will need to configure a new IP address each stop/start
     Type: String
   HostedZoneId:
-    Description: Select the ID of your hosted zone - if there isn't one please go back to the section that describes setting up a domain name and hosted zone
+    Description: Select the ID of your hosted zone - if there isn't one please go back to the section that describes setting up a domain name and hosted zone. Must match the HostedZoneId used on your Control Panel stack.
     Type: 'AWS::Route53::HostedZone::Id'
     ConstraintDescription: >-
       Although optional, it's required if you are using a custom domain
@@ -358,22 +357,18 @@ Resources:
           - |
             #!/bin/bash -xe
             export DEBIAN_FRONTEND=noninteractive
-            #confirmed live: apt update's own index fetch can transiently fail (regional mirror briefly out
-            #of sync) - a few retries with backoff instead of failing the whole bootstrap over one blip
+            #apt update's index fetch fails transiently when a regional mirror is briefly out of sync
             apt update || (sleep 5 && apt update) || (sleep 15 && apt update)
-            #best-effort, not fatal: confirmed live, a routine OS security patch can 404 (security.ubuntu.com
-            #listing a .deb the regional mirror hasn't caught up with yet) - none of this is required for the
-            #game server itself to run, so don't burn the full CreationPolicy timeout over it. This can't be
-            #fixed by moving the cfn-signal trap earlier either - cfn-signal itself isn't installed until
-            #after this point (see pip3 install below), so a failure here still can't self-report either way.
+            #Best-effort, not fatal: a routine security patch can 404 while the regional mirror catches
+            #up with the index, and none of this is required for the game server to run - not worth
+            #burning the CreationPolicy timeout. Moving the cfn-signal trap earlier wouldn't help either,
+            #since cfn-signal isn't installed until the pip3 line below.
             apt upgrade -y || echo "apt upgrade failed - continuing, not required for the game server itself"
             apt install -y python3-pip
             pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
             trap 'cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}' EXIT
-            #on the root disk, not /tmp: /tmp is cleared on every reboot (this AMI mounts it as tmpfs), but
-            #status_agent.py re-reads these two values every time it (re)starts, including after every
-            #stop/start cycle - and this instance always goes through at least one, since it auto-shuts-down
-            #~2 minutes after install and gets started again from the Control Panel.
+            #On the root disk, not /tmp, which this AMI mounts as tmpfs and clears on every reboot -
+            #status_agent.py re-reads these values on every restart, including after one.
             mkdir -p /etc/game-server-manager
             echo ${AWS::StackName} > /etc/game-server-manager/paramName.txt
             echo ${StatusBucket} > /etc/game-server-manager/statusBucket.txt
@@ -453,29 +448,21 @@ Resources:
                   - arn:aws:s3:::${bucket}/status/${GameName}.json
                   - bucket: !ImportValue common-infra-status-bucket-name
               - Effect: Allow
-                #destination for the "Download World" feature's zip upload (see cfn/control-panel.yaml) -
-                #same shared status bucket, a separate prefix
                 Action: "s3:PutObject"
                 Resource: !Sub
                   - arn:aws:s3:::${bucket}/worlds/${GameName}/*
                   - bucket: !ImportValue common-infra-status-bucket-name
-      #lets AWS Systems Manager Run Command reach and execute on this instance (control/data channels +
-      #ssm:UpdateInstanceInformation) - the standard AWS-maintained policy for any SSM-managed instance,
-      #used by the Control Panel's "Download Backup" feature to zip the live data directory on request.
+      #Systems Manager Run Command is how the Control Panel's world downloads, mod management and game
+      #restarts execute on this instance.
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   BackupIamRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      #Deterministic name (not CFN-generated) so the Control Panel's Lambda - in a different stack, with
-      #no way to !GetAtt this role - can construct its ARN from just the game name, to pass as
-      #backup:StartBackupJob's IamRoleArn for the "Backup Now" button. (Tried tag-based lookup via the
-      #Resource Groups Tagging API first - confirmed live that API simply doesn't index IAM roles at all
-      #in this account, empty results even with no tag filter - so a deterministic name is the only
-      #option.) This forces a one-time IAM role replacement here, which cascades into replacing
-      #TagBasedBackupSelection below (its IamRoleArn references this role) - see the SelectionName comment
-      #there for why that needs a one-time rename too.
+      #Named, not CFN-generated, so the Control Panel's Lambda - in another stack, with no way to
+      #!GetAtt this role - can build its ARN from the game name alone. A tag-based lookup isn't an
+      #option: the Resource Groups Tagging API doesn't index IAM roles at all.
       RoleName: !Sub "${AWS::StackName}-backup-role"
       AssumeRolePolicyDocument:
         Version: 2012-10-17
@@ -502,8 +489,7 @@ Resources:
                 Action:
                   - ec2:CreateImage
                   - ec2:DeregisterImage
-                  #restoring an EBS-type recovery point creates a brand new volume from its snapshot -
-                  #CreateVolume can't be scoped to a specific ARN since the volume doesn't exist yet.
+                  #Restoring creates a new volume, so CreateVolume has no ARN to be scoped to.
                   - ec2:CreateVolume
                 Resource: "*"
               - Effect: Allow
@@ -526,9 +512,8 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                   - ec2:DescribeElasticGpus
                   - ec2:DescribeSpotInstanceRequests
-                  #EC2 Describe* actions don't support resource-level scoping - the ec2:DescribeVolumes
-                  #grant further down, scoped to snapshot/volume ARNs, is silently ineffective. Needs
-                  #Resource: "*" here to actually work, same as every other Describe* action in this policy.
+                  #EC2 Describe* actions don't support resource-level scoping - scoped to an ARN they
+                  #are silently ineffective.
                   - ec2:DescribeVolumes
                 Resource: "*"
               - Effect: Allow
@@ -588,18 +573,13 @@ Resources:
     Type: "AWS::Backup::BackupSelection"
     Properties:
       BackupSelection:
-        #Renamed (was "tag-based-backup-selection") only because BackupIamRole just gained a RoleName,
-        #which forces IAM role replacement - and since this selection's IamRoleArn references that role,
-        #CloudFormation tries to replace this resource too (create-new-before-delete-old), which AWS
-        #Backup rejects if a selection with the same name already exists on the plan. A one-time rename
-        #dodges that; RoleName is now fixed going forward, so this won't need to change again.
+        #Anything that replaces BackupIamRole replaces this selection too, and CloudFormation creates
+        #the new one before deleting the old - which AWS Backup rejects while a selection of the same
+        #name is on the plan. Bump this name in the same update.
         SelectionName: "tag-based-backup-selection-v2"
         IamRoleArn: !GetAtt BackupIamRole.Arn
-        #IdTagName/IdTagValue alone isn't enough to scope this to just this stack's own resources - that
-        #tag pair is deliberately identical across every Server stack (it's how the Control Panel discovers
-        #instances), so a selection matching only on it pulls in every other game's instance/volume too.
-        #Both EC2Instance and GameDataVolume are also tagged with game-name, which is unique per stack -
-        #ANDing on it here scopes each stack's vault to just its own resources.
+        #IdTagName/IdTagValue is identical across every Server stack, so matching on it alone would pull
+        #every other game's resources into this vault. game-name is unique per stack.
         ListOfTags:
           - ConditionType: "STRINGEQUALS"
             ConditionKey: !Ref IdTagName
@@ -793,9 +773,8 @@ Resources:
                       isIdleNow = not currentPlayers #covers both 0 players and "can't determine" (e.g. game not running)
                       if isIdleNow and wasIdle:
                           ec2.stop_instances(InstanceIds=[instanceId])
-                          #clear the tag on the stop itself, not just on the next start - otherwise a
-                          #stopped instance still carries idle-check=true and the control panel shows
-                          #"Idle - stopping soon" for a server that's already stopped.
+                          #Clear the tag on the stop itself: otherwise a stopped instance still carries
+                          #idle-check=true and reads "Idle - stopping soon" in the control panel.
                           ec2.delete_tags(Resources=[instanceId], Tags=[{'Key': 'idle-check', 'Value': 'true'}])
                       elif isIdleNow:
                           ec2.create_tags(Resources=[instanceId], Tags=[{'Key': 'idle-check', 'Value': 'true'}])
@@ -810,9 +789,8 @@ Resources:
   IdleCheckSchedule:
     Type: AWS::Events::Rule
     Properties:
-      #deterministic name (not CFN-generated) so the Control Panel's Lambda - in a different stack, with no
-      #way to !GetAtt this rule - can address it by name to pause/resume/check it, same pattern already
-      #used for BackupIamRole's RoleName.
+      #Named, so the Control Panel's Lambda - in another stack, with no way to !GetAtt this rule - can
+      #pause, resume and check it by name.
       Name: !Sub "${AWS::StackName}-idle-check"
       Description: Checks every 15 minutes whether this server has had no players for two consecutive checks, and stops it if so
       ScheduleExpression: rate(15 minutes)

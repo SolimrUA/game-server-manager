@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT-0
 
 //EDIT ONLY THESE VALUES
-var mcCloudfrontUrl = 'REPLACE-WITH-CFURL' //mcCloudfrontUrl
-var mcCognitoClientID = 'REPLACE-WITH-COGNITO' //mcCognitoClientID
-var mcCognitoDomainName = 'REPLACE-WITH-COGDOMAIN' //mcCognitoDomainName
-var mcCognitoPoolsId = 'REPLACE-WITH-POOLS-ID' //mcCognitoPoolsId
-var API_URL = 'REPLACE-WITH-APIURL'; //mcControlApiUrl
+var mcCloudfrontUrl = 'REPLACE-WITH-CFURL'
+var mcCognitoClientID = 'REPLACE-WITH-COGNITO'
+var mcCognitoDomainName = 'REPLACE-WITH-COGDOMAIN'
+var mcCognitoPoolsId = 'REPLACE-WITH-POOLS-ID'
+var API_URL = 'REPLACE-WITH-APIURL';
 
 const query_string = "?tagname=REPLACE-WITH-IDTAGNAME&tagvalue=REPLACE-WITH-IDTAGVALUE"
 var tagName = 'REPLACE-WITH-IDTAGNAME'

@@ -5,16 +5,14 @@ import boto3
 import json
 class noIpFound(Exception): pass
 
-def lambda_handler(event, context): #standard function called on lambda invocation
-
-#get IP address
+def lambda_handler(event, context):
     instanceId = event['instanceId']
     ec2 = boto3.client('ec2')
     response = ec2.describe_instances(InstanceIds=[instanceId])
     try:
         publicIp = response['Reservations'][0]['Instances'][0]['PublicIpAddress']
     except Exception:
-        raise noIpFound('No Public IP address found...yet....') #if IP address is none, raise error
+        raise noIpFound('No Public IP address found...yet....')
     updateDNS(publicIp, event['hostedZoneId'], event['domainName'])
  
     return {

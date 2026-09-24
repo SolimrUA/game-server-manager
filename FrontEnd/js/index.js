@@ -1,34 +1,25 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-//Whether the signed-in Cognito user is in the "admins" group - fetched once in init() from the ID
-//token's own cognito:groups claim. This only drives which buttons render; the Lambda re-checks
-//independently and is the real security boundary (see gaming_server_start_stop-v1_0.py).
+//Only drives which buttons render - the Lambda re-checks the caller's groups itself and is the real
+//security boundary.
 var mcIsAdmin = false;
 
-// Defining async function taking in JWT and URL
 async function mcInfo(url, idToken) {
 
-    //mcInfo
     var mcInfodata = API_URL + "getinfo/" + query_string;
-    
-    // Storing response
+
     const response = await fetch(mcInfodata, {
       method: 'get',
       headers: new Headers({
         'Authorization': idToken
       })
     });
-    
-    //Storing data in form of JSON
+
     var data = await response.json();
     renderTable(data);
 }
 
-// Maps raw instance State to a badge CSS class
-//GameName (cfn/server-stack.yaml's GameName parameter) is a lowercase-hyphen slug used to name AWS
-//resources - display a human-readable name instead. Unknown/future games fall back to a capitalized
-//version of the slug rather than showing nothing.
 var MC_GAME_DISPLAY_NAMES = {
   'valheim': 'Valheim',
   'vintagestory': 'Vintage Story'
@@ -39,9 +30,6 @@ function mcGameDisplayName(gameName) {
   return gameName.charAt(0).toUpperCase() + gameName.slice(1);
 }
 
-// What an admin pastes into "Install Mod" differs per game's own mod site - see
-// docs/frontend-ui-ux-requirements.md's "Install/delete mods" section for the back-end side of this
-// (installmod/deletemod endpoints don't exist yet).
 var MC_MOD_SOURCE_HINT = {
   'vintagestory': { placeholder: 'e.g. carrycapacity', label: 'Mod ID or slug from mods.vintagestory.at' },
   'valheim': { placeholder: 'e.g. Smoothbrain-EquipmentAndQuickSlots', label: 'Full package name from thunderstore.io (Namespace-Name)' }
@@ -50,8 +38,6 @@ function mcModSourceHint(gameName) {
   return MC_MOD_SOURCE_HINT[gameName] || { placeholder: 'mod identifier', label: 'Mod identifier' };
 }
 
-// The EC2 instance can be running before/without the game process itself being up (still installing,
-// crash-looping, etc) - this is deliberately a separate badge from the EC2 State one. See docs/server-status.md.
 function mcGameStatus(instance) {
   if (instance['State'] !== 'running') {
     return { text: '—', badgeClass: null };
@@ -63,9 +49,7 @@ function mcGameStatus(instance) {
   return { text: 'Starting…', badgeClass: 'pending' };
 }
 
-// IdleShutdownStatus: 'disabled' (paused, e.g. for maintenance), 'enabled' (15-min idle check running,
-// hasn't seen an empty check yet), or 'triggered-once' (one empty check already recorded - the *next*
-// empty check will actually stop the instance).
+// 'triggered-once' means one empty check is already recorded, so the next one stops the instance.
 function mcIdleShutdownStatus(instance) {
   var status = instance['IdleShutdownStatus'];
   if (status === 'disabled') return { text: 'Paused', badgeClass: 'stopped' };
@@ -74,11 +58,7 @@ function mcIdleShutdownStatus(instance) {
   return { text: '—', badgeClass: null };
 }
 
-// Single at-a-glance status combining EC2 State, GameStatus.serviceStatus and IdleShutdownStatus - replaces
-// showing State/Game Status/Auto-Shutdown as three separate columns. Only surfaces "Idle" once idle-shutdown
-// has actually recorded an empty check (IdleShutdownStatus 'triggered-once' - see mcIdleShutdownStatus above);
-// idle-shutdown merely being turned on isn't itself notable enough for the main State column, so that stays
-// visible only in the Overview tab's Auto-Shutdown field.
+// Auto-shutdown merely being enabled isn't worth surfacing here; it stays in the Overview tab.
 function mcCombinedState(instance) {
   var ec2State = instance['State'];
   if (ec2State !== 'running') {
@@ -94,10 +74,9 @@ function mcCombinedState(instance) {
   return { text: 'Running', badgeClass: 'running' };
 }
 
-// The resize Lambda maps this value through a fixed set of environment variables (micro/small/medium/large
-// -> t3a.*, see cfn/control-panel.yaml's StartStopLambda) rather than accepting an EC2 instance type string
-// directly, so the <option> value stays the slug the backend expects - only the label changes to the real
-// type it resolves to. xlarge/2xlarge are left out because the Lambda has no mapping for them yet.
+// The resize Lambda takes a slug, not an instance type: it resolves one through a fixed
+// micro/small/medium/large -> t3a.* map of environment variables (cfn/control-panel.yaml's
+// StartStopLambda), so a size with no mapping there can't be offered here.
 var MC_RESIZE_OPTIONS = [
   { value: 'micro', type: 't3a.micro' },
   { value: 'small', type: 't3a.small' },
@@ -111,11 +90,8 @@ function mcResizeOptionsHtml(currentInstanceType) {
   }).join('');
 }
 
-// One state-aware Start/Stop button rather than always showing both - disabled with a transitional label
-// while EC2 itself is mid-transition, since neither action applies until that settles. `permissionDenied`
-// is for the table's quick-action button only (see mcActionClusterHtml callers in the Actions tab, which
-// omit the button entirely instead) - it keeps the button visible but inert, with a tooltip explaining why,
-// rather than the table's column layout shifting per-row based on who's looking at it.
+// `permissionDenied` keeps the button visible but inert, so the table's columns don't shift per row
+// depending on who's looking. The Actions tab omits it entirely instead.
 function mcLifecycleButtonHtml(ec2State, permissionDenied) {
   var label, cls;
   if (ec2State === 'stopped') { label = 'Start'; cls = 'start'; }
@@ -126,32 +102,18 @@ function mcLifecycleButtonHtml(ec2State, permissionDenied) {
   return '<button class="btn ' + cls + ' mcLifecycleBtn"' + (disabled ? ' disabled' : '') + title + '>' + label + '</button>';
 }
 
-// Restarts just the game process/container, not the EC2 instance - e.g. to pick up a mod just
-// installed/removed or a hand-edited config, without the ~minutes-long cost of a full Stop/Start.
-// Admin-only (restartGame falls under the Lambda's generic admin-only permission bucket, same as Resize/
-// Backup Now/mods - not the UserLifecycleAllowed tag Start/Stop use), so gated by mcIsAdmin at the call
-// site, not shown here. `enabled` is false while the instance isn't running, same treatment as the other
-// lifecycle/mod controls.
 function mcRestartGameButtonHtml(enabled) {
   var title = enabled ? 'Restart just the game process, not the EC2 instance' : 'Start the server to restart the game';
   return '<button type="button" class="btn mcRestartGameBtn"' + (enabled ? '' : ' disabled') + ' title="' + title + '">Restart Game</button>';
 }
 
-// NOTE: updategame doesn't exist on the back end yet - see docs/frontend-ui-ux-requirements.md's
-// "Update the game" section. Admin-only, same bucket as Restart Game/Resize/Backup Now, and disabled while
-// the instance isn't running for the same reason (needs SSM Run Command against the instance). Updating
-// already restarts the game as part of what it does on both games, so this is a peer of Restart Game, not
-// something that needs a separate restart afterward.
 function mcUpdateGameButtonHtml(enabled) {
   var title = enabled ? 'Update the game server software to the latest version' : 'Start the server to update the game';
   return '<button type="button" class="btn mcUpdateGameBtn"' + (enabled ? '' : ' disabled') + ' title="' + title + '">Update Game</button>';
 }
 
-// `scope` is 'full' (world save + mods + player data - everything WorldDownloadPaths lists) or 'core'
-// (world save only). Only one download can run at a time per instance either way - the SSM command zips
-// to a fixed /tmp path on the instance, so a second one while the first is still running would collide -
-// hence disabling every download button (both scopes, table and Actions tab alike) whenever any download
-// for this instance is in progress, not just the one that was clicked.
+// The SSM command zips to a fixed /tmp path, so only one download can run per instance - any download
+// in progress disables every download button for it, not just the one that was clicked.
 function mcDownloadWorldButtonHtml(instanceId, scope, label, permissionDenied) {
   var inProgress = worldDownloads[instanceId] && worldDownloads[instanceId].status === 'InProgress';
   var disabled = inProgress || permissionDenied;
@@ -196,9 +158,6 @@ function mcSwitchTab(detailRow, tabName) {
   });
 }
 
-// Formats "time since a timestamp" - used for both LastBackupTime (AWS Backup's own schedule, independent
-// of the instance's State) and lastSaveTime (the game's own last autosave - a different concept: one is
-// infrastructure-level EBS backup, the other is what the game itself last wrote to its world file).
 function mcRelativeTimeText(timestamp) {
   if (!timestamp) return '—';
   var diffMinutes = Math.floor((Date.now() - new Date(timestamp).getTime()) / (1000 * 60));
@@ -209,11 +168,8 @@ function mcRelativeTimeText(timestamp) {
   return Math.floor(diffHours / 24) + 'd ago';
 }
 
-// Per-instance world-download state, kept outside the DOM: the table body gets fully torn down and
-// rebuilt on every periodic refresh (see renderTable's `tbody.innerHTML = ''`), which would otherwise wipe
-// out any in-progress download status a couple seconds after it appeared. Read by renderTable on every
-// rebuild (same idea as the existing previouslySelectedInstanceId handling) and updated live by the poll
-// loop in between rebuilds.
+// Kept outside the DOM because the periodic refresh tears down and rebuilds the whole table body,
+// wiping any in-progress status a couple of seconds after it appeared.
 var worldDownloads = {};
 
 function mcWorldDownloadStatusHtml(instanceId) {
@@ -226,14 +182,12 @@ function mcWorldDownloadStatusHtml(instanceId) {
   return 'Preparing ' + scopeLabel + ' archive…' + (dl.attempt ? ' (' + dl.attempt + ')' : '');
 }
 
-// Pushes the current worldDownloads state into the live DOM, if that row still exists right now (it
-// usually does - this just avoids waiting for the next periodic refresh to reflect a status change).
+// So a status change doesn't have to wait for the next periodic refresh.
 function mcRefreshWorldDownloadStatusUi(instanceId) {
   var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
   var detailRow = row && row.nextElementSibling;
   var inProgress = worldDownloads[instanceId] && worldDownloads[instanceId].status === 'InProgress';
 
-  // The table row's quick button and the Actions tab's duplicates both need the same in-progress state.
   [row, detailRow].forEach(function (container) {
     if (!container) return;
     container.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
@@ -257,9 +211,6 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
-// mods: array of {name, version} from GameStatus - see docs/server-status.md. `canDelete` shows a remove
-// icon per mod (admin-only - see canManageMods in renderTable); `enabled` disables it while the instance
-// isn't running, same treatment as the lifecycle/download buttons (visible but inert, not hidden).
 function renderModsList(mods, canDelete, enabled) {
   if (!mods || mods.length === 0) {
     return '<p class="mcModsEmpty">No mod info available yet.</p>';
@@ -274,9 +225,6 @@ function renderModsList(mods, canDelete, enabled) {
   }).join('') + '</ul>';
 }
 
-// Placed below the mod list/form - `gameName` picks the right hint text for what to paste (see
-// mcModSourceHint above); `enabled` is false while the EC2 instance isn't running (mod install/delete
-// goes through SSM Run Command on the instance, the same as Backup Now/Download World).
 function mcInstallModFormHtml(gameName, enabled) {
   var hint = mcModSourceHint(gameName);
   return '<div class="mcInstallModForm">' +
@@ -286,21 +234,18 @@ function mcInstallModFormHtml(gameName, enabled) {
     '<p class="mcModSourceHint">' + escapeHtml(hint.label) + (enabled ? '' : ' — start the server to install or remove mods') + '</p>';
 }
 
-// Renders one row per instance, preserving which row (if any) is currently expanded
 async function renderTable(data) {
     var instances = (data && data[1] && data[1]["Instances"]) || [];
     var tbody = document.getElementById('mcServerTableBody');
     var previouslySelectedRow = tbody.querySelector('tr.mcServerRow.selected');
     var previouslySelectedInstanceId = previouslySelectedRow ? previouslySelectedRow.dataset.instanceId : null;
-    // Scoped to the selected row's own detail panel - querying the whole tbody would find whichever
-    // row happens to come first in the list (still showing its default Overview tab), not the tab the
-    // user actually has open on the expanded row, and periodic refreshes would keep snapping back to it.
+    // Scoped to the selected row's own panel: querying the whole tbody would find whichever row comes
+    // first (still on its default Overview tab), and every refresh would snap the open row back to it.
     var previouslyActiveDetail = previouslySelectedRow && previouslySelectedRow.nextElementSibling;
     var previouslyActiveTabEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcTab.active');
     var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
-    // Same rebuild-wipes-live-state problem as the selection/tab above, but for text actually being typed:
-    // the periodic refresh tears down and rebuilds every row's markup from scratch, which would otherwise
-    // silently erase whatever the admin is mid-typing into the Install Mod field a few seconds later.
+    // Same rebuild problem, applied to text being typed: without this, the refresh erases whatever is
+    // half-entered in the Install Mod field.
     var previouslyModRefEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcModRefInput');
     var previouslyModRefValue = previouslyModRefEl ? previouslyModRefEl.value : '';
     var previouslyModRefFocused = previouslyModRefEl === document.activeElement;
@@ -322,10 +267,7 @@ async function renderTable(data) {
       var idlePaused = instance['IdleShutdownStatus'] === 'disabled';
       var canLifecycle = mcIsAdmin || instance['UserLifecycleAllowed'];
       var canDownload = mcIsAdmin || instance['UserDownloadsAllowed'];
-      // Install/delete rewrites the server's actual content, not just start/stop or a read-only download -
-      // admin-only, no per-user override (see docs/frontend-ui-ux-requirements.md). Separate from whether
-      // the instance is actually running right now, which just disables the controls (same treatment as
-      // mcLifecycleButtonHtml/mcDownloadWorldButtonHtml - visible but inert, not hidden).
+      // Installing or deleting a mod rewrites the server's content: admin-only, no per-user override.
       var canManageMods = mcIsAdmin;
       var modsRunning = ec2State === 'running';
       var playersText = status && status.players && status.players.current != null
@@ -376,9 +318,7 @@ async function renderTable(data) {
               mcDownloadWorldButtonHtml(instanceId, 'full', 'Download (All Data)') +
               mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)') +
               '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '') +
-            // Restarts the game process, not EC2 power state - Data rather than Power since it's grouped
-            // with the other "acts on the server's live content/state" actions, not instance lifecycle.
-            // Update Game sits right next to it for the same reason.
+            // Grouped under Data, not Power: these act on the server's content, not its power state.
             (mcIsAdmin ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
         (mcIsAdmin ?
           mcActionClusterHtml('Automation',
@@ -423,8 +363,6 @@ async function renderTable(data) {
       detailRow.querySelectorAll('.mcTab').forEach(function (tab) {
         tab.onclick = function (e) { e.stopPropagation(); mcSwitchTab(detailRow, tab.dataset.tab); };
       });
-      // Only the row that was actually open keeps its tab - every other (hidden) row starts fresh on
-      // Overview rather than inheriting whatever tab happened to be open elsewhere.
       mcSwitchTab(detailRow, instanceId === previouslySelectedInstanceId ? previouslyActiveTab : 'overview');
 
       var select = detailRow.querySelector('select');
@@ -432,8 +370,6 @@ async function renderTable(data) {
       var backupBtn = detailRow.querySelector('.mcBackupNowBtn');
       var idleToggleBtn = detailRow.querySelector('.mcIdleShutdownToggleBtn');
 
-      // Both the table row's quick lifecycle/download buttons and their Actions-tab duplicates get the
-      // same handler - clicking either does the same thing.
       [row, detailRow].forEach(function (container) {
         var lifecycleBtn = container.querySelector('.mcLifecycleBtn');
         if (lifecycleBtn && !lifecycleBtn.disabled) lifecycleBtn.onclick = function (e) {
@@ -479,8 +415,6 @@ async function renderTable(data) {
         };
       });
 
-      // Appears both in the Data cluster and again in the Mods tab (see mcRestartGameButtonHtml) -
-      // clicking either does the same thing.
       detailRow.querySelectorAll('.mcRestartGameBtn').forEach(function (btn) {
         if (btn.disabled) return;
         btn.onclick = function (e) {
@@ -508,14 +442,13 @@ async function renderTable(data) {
         detailRow.classList.remove('hidden');
       }
 
-      // Must happen after the appendChild calls above - .focus() is a silent no-op on a node that isn't
-      // attached to the document yet, which is exactly what modRefInput still was right after creation.
+      // Must follow the appendChild calls above: .focus() is a silent no-op on a detached node.
       if (modRefInput && previouslyModRefFocused && instanceId === previouslySelectedInstanceId) {
         modRefInput.focus();
         modRefInput.setSelectionRange(modRefInput.value.length, modRefInput.value.length);
       }
 
-      // Async DNS-vs-actual-IP check; updates the dot without blocking the initial render
+      // Deliberately not awaited: updates the dot without blocking the render
       if (dns !== '—') {
         dnsLookup(dns).then(function (resolvedIp) {
           var dot = row.querySelector('[data-dns-dot]');
@@ -556,7 +489,6 @@ function dropdownMenu() {
   var ddc = document.getElementById("dropdownClick");
   if (ddc.className === "top-nav") {
     ddc.className += " responsive";
-    // Change top-nav to top-nav.responsive on Click
   } else {
     ddc.className = "top-nav"
   }
@@ -645,9 +577,7 @@ async function backupNow(instanceId) {
   }
 }
 
-// NOTE: installmod/deletemod don't exist on the back end yet - see docs/frontend-ui-ux-requirements.md's
-// "Install/delete mods" section. modRef is whatever the admin pasted (a ModDB id/slug for Vintage Story, a
-// "Namespace-Name" package name for Valheim - see mcModSourceHint) and is resolved to a download server-side.
+// modRef is whatever the admin pasted, resolved to an actual download server-side.
 async function installMod(instanceId, modRef) {
   var url = API_URL + "installmod/" + query_string +
     (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "") + "&modref=" + encodeURIComponent(modRef);
@@ -690,9 +620,6 @@ async function deleteMod(instanceId, modName) {
   }
 }
 
-// Restarts just the game process/container - the EC2 instance itself stays running throughout, so this
-// is a few seconds to kick off rather than the minutes a full Stop/Start takes. See restartGame in
-// Lambda/gaming_server_start_stop-v1_0.py.
 async function restartGame(instanceId) {
   var url = API_URL + "restartgame/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "");
   var jwt = await getJwt();
@@ -713,10 +640,7 @@ async function restartGame(instanceId) {
   }
 }
 
-// NOTE: updategame doesn't exist on the back end yet - see docs/frontend-ui-ux-requirements.md's
-// "Update the game" section. Updates the game server software itself (not the EC2 instance, not a mod) to
-// the latest version, which on both games already restarts the game as part of doing so - no separate
-// restartGame call needed after this one succeeds.
+// The update restarts the game as part of what it does, so no restartGame call is needed after it.
 async function updateGame(instanceId) {
   var url = API_URL + "updategame/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "");
   var jwt = await getJwt();
@@ -765,16 +689,8 @@ async function setIdleShutdown(path, instanceId) {
   }
 }
 
-// Zips specific subfolders of the currently-live data directory via SSM Run Command (only works while the
-// server is running) and uploads the result to S3 - see docs/server-status.md and the Control Panel design
-// notes. Kicked off by downloadWorld, then polled by pollWorldDownloadStatus until a presigned download URL
-// comes back.
-// State lives in worldDownloads (not a captured DOM element) since the periodic refresh rebuilds the
-// whole table every few seconds - see the comment on worldDownloads itself.
-// `scope` is 'full' (everything WorldDownloadPaths lists - mods, player data, world save) or 'core'
-// (world save only) - see mcDownloadWorldButtonHtml above. NOTE: the downloadworldstart Lambda doesn't
-// read this parameter yet - see docs/frontend-ui-ux-requirements.md's "Core vs. full world download"
-// section - so until that's wired up, 'core' produces the same (full) archive as 'full' does.
+// Starts a server-side zip, then polls until a presigned download URL comes back. Only works while the
+// instance is running.
 async function downloadWorld(instanceId, scope) {
   scope = scope || 'full';
   worldDownloads[instanceId] = { status: 'InProgress', attempt: 0, scope: scope };
@@ -803,8 +719,8 @@ function retryWorldDownload(instanceId) {
   pollWorldDownloadStatus(instanceId, dl.commandId, dl.s3Key, 0, dl.scope);
 }
 
-// Zipping+uploading a multi-GB world takes an unbounded amount of time, and API Gateway can't hold a
-// request open past 29s anyway - so this polls a separate status endpoint rather than blocking on one call.
+// Zipping and uploading a multi-GB world takes longer than API Gateway will hold a request open (29s),
+// so progress comes from a separate status endpoint rather than one blocking call.
 async function pollWorldDownloadStatus(instanceId, commandId, s3Key, attempt, scope) {
   var maxAttempts = 60; // 60 * 5s = 5 minutes
   var jwt = await getJwt();
@@ -922,9 +838,6 @@ async function init() {
         let IdToken = res.getIdToken()
         let resJwt = IdToken.getJwtToken()
 
-        //You can print them to see the full objects
-        //console.log(`myIdToken: ${JSON.stringify(IdToken)}`)
-        //console.log(`myJwt: ${resJwt}`)
         return resJwt
         })
         .catch(e => {console.log(e)})
@@ -975,9 +888,6 @@ async function getJwt() {
       let IdToken = res.getIdToken()
       let resJwt = IdToken.getJwtToken()
 
-      //You can print them to see the full objects
-      //console.log(`myIdToken: ${JSON.stringify(IdToken)}`)
-      //console.log(`myJwt: ${resJwt}`)
       return resJwt
       })
       .catch(e => {console.log(e)})

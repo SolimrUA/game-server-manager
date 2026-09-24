@@ -15,27 +15,19 @@ exactly that one key. Nothing else in the bucket is writable by the instance.
 
 ## Who writes it
 
-A per-game "status agent" process, installed by that game's cartridge script (e.g.
-[`scripts/VintageStory/install.sh`](../scripts/VintageStory/install.sh), which fetches its companion
-[`status_agent.py`](../scripts/VintageStory/status_agent.py) from alongside itself and runs it as a systemd service),
-running alongside the actual game server. It re-checks state on a short interval and only re-uploads the JSON when
-something actually changed, to keep S3 costs and API calls minimal. What "re-checks state" means is inherently
-game-specific:
-
-- Vintage Story's agent asks the game process directly via its console (see below), since that's what the game's
-  own tooling does too.
-- Valheim's agent ([`scripts/Valheim/status_agent.py`](../scripts/Valheim/status_agent.py)) shells into the game's
-  docker container (`docker compose exec valheim odin status --json`), since Odin (the `mbround18/valheim` image's
-  own launcher) already exposes player count/version/mods this way - no console/log-scraping needed.
+A per-game "status agent" process, installed as a systemd service by that game's cartridge script, which fetches
+it from alongside itself. It re-checks state on a short interval and re-uploads only when something changed. How it
+re-checks is game-specific: [Vintage Story's](../scripts/VintageStory/status_agent.py) asks the game through its
+console (see below), [Valheim's](../scripts/Valheim/status_agent.py) shells into the docker container, where Odin
+already exposes all of it.
 
 ## Sending the Vintage Story server console commands
 
-Vintage Story has no network API - the only way to control a running server is through its console, and the only
-way to reach that console on a headless box is `server.sh`'s `command` action. `server.sh` is the game's own
-launcher script, bundled inside its server download (not something this repo ships) and extracted to
-`/home/vintagestory/server/server.sh` alongside the game binary; it runs the server inside a detached `screen`
-session and can inject text into that session's stdin on request. `status_agent.py` uses this to run `/stats` for
-the player count; the same mechanism works for any other server console command, e.g.:
+Vintage Story has no network API, so the only way to control a running server is its console - reachable on a
+headless box through `server.sh`'s `command` action. `server.sh` is the game's own launcher, bundled in its server
+download and extracted to `/home/vintagestory/server/server.sh`; it runs the server inside a detached `screen`
+session and injects text into that session's stdin on request. `status_agent.py` runs `/stats` this way, and any
+other console command works the same:
 
 ```bash
 sudo -u vintagestory /home/vintagestory/server/server.sh command "announce Restarting in 5 minutes"
@@ -46,9 +38,8 @@ sudo -u vintagestory /home/vintagestory/server/server.sh command "announce Resta
 The Control Panel's `getinfo` Lambda (`Lambda/gaming_server_start_stop-v1_0.py`) reads the object for each running
 instance (using the instance's `game-name` tag to build the key) and merges it into the `getinfo` API response as
 `GameStatus`. The front-end (`FrontEnd/js/index.js`) reads `GameStatus` straight off that response - it never talks
-to S3 directly. One field, `serverName`, is additionally promoted to a top-level `ServerName` on the instance
-object itself (see [`docs/frontend-ui-ux-requirements.md`](./frontend-ui-ux-requirements.md)) - the front-end's
-Server Name column expects it there, not nested under `GameStatus`.
+to S3 directly. One field, `serverName`, is also promoted to a top-level `ServerName` on the instance object,
+where the front-end's Server Name column expects it.
 
 ## Schema
 
@@ -74,22 +65,16 @@ Server Name column expects it there, not nested under `GameStatus`.
 - `serverName` - the display name players see when connecting/browsing for the server (Vintage Story:
   `serverconfig.json`'s `ServerName`; Valheim: the `NAME` env var, read back via `odin status`'s own `name`
   field). `null` if blank/unset. Promoted to the top-level `ServerName` field - see above.
-- `serviceStatus` - whether the game process itself is actually up: `active`, `activating`, `inactive`,
-  `deactivating`, `failed`, or `unknown` (the values `systemctl is-active` uses, though an agent can derive this any
-  way that's accurate for that game - Vintage Story's checks for the live process directly rather than trusting
-  systemd, since its process supervisor is a detached `screen` session systemd doesn't track precisely). This is
-  deliberately separate from the EC2 instance's own running/stopped state, which the front-end gets straight from
-  `ec2:DescribeInstances`, not from this file: an instance can be `running` while the game is still starting up,
-  crash-looping (`failed`), or not installed yet. The front-end shows both, as separate State and Game columns, so
-  "server started but the game didn't come up" reads differently from "not started yet".
+- `serviceStatus` - whether the game process is up: `active`, `activating`, `inactive`, `deactivating`, `failed`,
+  or `unknown` (the values `systemctl is-active` uses, though an agent may derive them any way that's accurate for
+  its game). Separate from the EC2 instance's own running/stopped state, which the control panel reads from
+  `ec2:DescribeInstances`: an instance can be `running` while the game is still starting, crash-looping, or not
+  installed.
 - `players.current` / `players.max` - integers. `max` may be `null` if the agent couldn't determine it.
 - `mods` - array of `{name, version}`. `version` is `null` when it couldn't be determined (e.g. a mod without a
   parseable manifest). Empty array if the game has no mod support or none are installed.
-- `lastSaveTime` - UTC ISO-8601 timestamp of when the game itself last wrote its world data (Vintage Story: the
-  mtime of the active save file, per `serverconfig.json`'s own `WorldConfig.SaveFileLocation`). Deliberately
-  distinct from the Control Panel's "Last Backup" column (`LastBackupTime`, from AWS Backup's own scheduled EBS
-  snapshot) - one is a genuine autosave the game itself performed, the other is unrelated infrastructure-level
-  backup, and conflating the two was a real point of confusion earlier in this project.
+- `lastSaveTime` - UTC ISO-8601 timestamp of when the game itself last wrote its world data. Distinct from the
+  Control Panel's "Last Backup" column (`LastBackupTime`), which comes from AWS Backup's EBS snapshot.
 - `updatedAt` - UTC ISO-8601 timestamp of when the agent last computed this snapshot (not necessarily when it was
   last *pushed*, since unchanged snapshots aren't re-uploaded).
 
@@ -98,21 +83,17 @@ data rather than erroring.
 
 ## Adding status reporting for another game
 
-Vintage Story and Valheim are two working examples of this pattern with different "re-check state" mechanisms (game
-console vs. shelling into a docker container) - see [Who writes it](#who-writes-it) above. For a third game:
+Vintage Story and Valheim implement this pattern two different ways - game console vs. shelling into a docker
+container. For a third game:
 
-1. Put the game's cartridge script in its own folder under `scripts/` (e.g. `scripts/VintageStory/`) alongside a status
-   agent script, following the same split used for Vintage Story and Valheim. The server stack invokes the cartridge script as
-   `./install.sh "$GameServer"`, so `$1` is the script's own source URL - use it to fetch sibling files (like the
-   status agent) from wherever `install.sh` itself was served from. In practice this is always your S3-published
-   copy (see the root README) - `GameServer` has no default and CloudFormation never fetches from GitHub.
-2. Have that status agent write this JSON shape to the path above on an interval, pushing only on change - including
-   `serviceStatus` from whatever process supervisor runs the game (e.g. `systemctl is-active <unit>` for a systemd
-   service), so the front-end can distinguish "EC2 running, game not up yet" from "both running".
-3. If the agent needs values the setup script only computes once (bucket name, status key, etc.), have the setup
-   script write them under `/etc/game-server-manager/`, not `/tmp` - `/tmp` is cleared on every reboot on this AMI,
-   but a status agent is a long-lived service that restarts on every boot, and every instance goes through at least
-   one reboot automatically (it shuts itself down ~2 minutes after install, then gets started again from the control
-   panel). A value read from `/tmp` at startup will be there on first boot and gone on every one after.
+1. Put the game's cartridge script in its own folder under `scripts/`, alongside a status agent script. The server
+   stack invokes the cartridge as `./install.sh "$GameServer"`, so `$1` is the script's own source URL - use it to
+   fetch the status agent from wherever `install.sh` itself was served from.
+2. Have that agent write this JSON shape to the path above on an interval, pushing only on change - including
+   `serviceStatus` from whatever supervises the game process, so "EC2 running, game not up yet" is distinguishable
+   from "both running".
+3. Have the setup script write any values the agent needs (bucket name, status key) under
+   `/etc/game-server-manager/`, not `/tmp`, which this AMI clears on every reboot - the agent re-reads them on
+   every restart, so a `/tmp` value is there on first boot and gone on every one after.
 4. Nothing else needs to change - the S3 key convention, IAM policy, and Lambda/front-end read path are already
    game-agnostic.

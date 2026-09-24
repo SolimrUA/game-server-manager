@@ -2,8 +2,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-# Reports player count/max, version and mods to S3 every 5s, only pushing when something changed.
-# See docs/server-status.md for the schema and why this exists.
+# Reports player count/max, version and mods to S3 every 5s, pushing only when something changed.
+# docs/server-status.md documents the JSON schema.
 import glob
 import hashlib
 import json
@@ -12,19 +12,16 @@ import re
 import subprocess
 import time
 
-#docker-compose.yml lives ON the persistent data volume (see valheim-prepare-data.sh in install.sh),
-#bootstrapped once so mod config (TYPE=BepInEx, MODS=...) survives instance replacement.
+#On the persistent data volume, so mod config survives instance replacement.
 DATA_DIR = "/usr/games/serverconfig/valheim"
 COMPOSE_FILE = os.path.join(DATA_DIR, "docker-compose.yml")
 SAVES_GLOB = os.path.join(DATA_DIR, "saves/worlds_local/*.db")
 STATE_FILE = "/usr/games/serverconfig/.status_last_hash"
 STATUS_TMP_FILE = "/tmp/status_push.json"
-#the docker-compose service name (not the container's runtime name, which docker compose suffixes with an
-#index like "valheim-1") - `docker compose exec` resolves this against whatever docker-compose.yml defines.
+#The compose service name, not the container's runtime name (suffixed with an index like "valheim-1").
 COMPOSE_SERVICE = "valheim"
-#read from /etc/game-server-manager, not /tmp: /tmp is cleared on every reboot on this AMI (tmpfs), but
-#this module-level code runs every time this long-lived service (re)starts, including after a reboot -
-#and this instance always goes through at least one, since it auto-shuts-down ~2 minutes after install.
+#/etc/game-server-manager, not /tmp, which this AMI clears on every reboot - this code re-runs on every
+#restart of this long-lived service, including after one.
 with open("/etc/game-server-manager/statusBucket.txt") as f:
     STATUS_BUCKET = f.read().strip()
 with open("/etc/game-server-manager/statusKey.txt") as f:
@@ -32,15 +29,11 @@ with open("/etc/game-server-manager/statusKey.txt") as f:
 
 
 def read_odin_status():
-    #the one source everything else below is derived from - Odin (the docker image's own launcher/manager)
-    #exposes a structured status command from inside the container; returns None on any failure (container
-    #not running, docker compose down, unexpected output) so callers can fall back cleanly rather than crash.
+    #Odin, the image's own launcher, exposes a structured status command from inside the container.
+    #None on any failure, so callers degrade rather than crash.
     try:
-        #--local is required: Odin's default query targets the server's PUBLIC address, which a process
-        #inside the container generally can't reach (hairpin NAT - the host's own public IP isn't routable
-        #from behind its own NAT/ENI) - confirmed live, this made `online` false and every other field
-        #empty/zeroed even while the game was actually up and joinable. --local queries the game over the
-        #container's loopback interface instead, which works regardless of network topology.
+        #--local is required: Odin otherwise queries the server's public address, which a process inside
+        #the container can't reach, and every field comes back empty while the game is up and joinable.
         result = subprocess.run(
             ["docker", "compose", "-f", COMPOSE_FILE, "exec", "-T", COMPOSE_SERVICE, "odin", "status", "--local", "--json"],
             capture_output=True, text=True, timeout=15,
@@ -48,10 +41,7 @@ def read_odin_status():
         if result.returncode != 0:
             print("odin status exited {}: stdout={!r} stderr={!r}".format(result.returncode, result.stdout, result.stderr))
             return None
-        #Odin has been observed writing its own log lines (e.g. a "Failed to request server information"
-        #ERROR when the game itself isn't up yet) to the same stream as the JSON, ahead of it - rather than
-        #confined to stderr the way `capture_output` would cleanly separate. Parse from the first '{' rather
-        #than assuming stdout is pure JSON, so a stray log line doesn't fail the whole read.
+        #Odin writes some of its own log lines into the same stream as the JSON, ahead of it.
         stdout = result.stdout
         brace = stdout.find("{")
         if brace == -1:
@@ -63,10 +53,8 @@ def read_odin_status():
         return None
 
 
-#Odin's own version field is a raw internal string like "g=0.221.12,n=36,m=" (game version, network
-#version, modified-flag) - confirmed live - rather than a plain version number. Pull out just the game
-#version for display; fall back to the raw string if it doesn't match, so an Odin format change degrades
-#gracefully instead of hiding the value entirely.
+#Odin reports version as a raw internal string like "g=0.221.12,n=36,m=" (game version, network version,
+#modified flag), falling back to the raw string if that format changes.
 ODIN_VERSION_RE = re.compile(r"g=([\d.]+)")
 
 
@@ -84,10 +72,8 @@ def read_service_status(odin_status):
 
 
 def read_mods(odin_status):
-    #bepinex.mods' exact item shape isn't confirmed against a live server (Odin's own docs don't spell it
-    #out) - handle both a list of {name, version} dicts and a list of Thunderstore-style
-    #"Author-Package-Version" strings, same "never crash the loop over one bad entry" spirit as Vintage
-    #Story's read_mod_info.
+    #Odin's docs don't pin down bepinex.mods' item shape, so handle both {name, version} dicts and
+    #Thunderstore-style "Author-Package-Version" strings.
     mods = []
     raw = ((odin_status or {}).get("bepinex") or {}).get("mods") or []
     for entry in raw:
@@ -107,9 +93,8 @@ def read_mods(odin_status):
 
 
 def read_last_save_time():
-    #distinct from AWS Backup's LastBackupTime (a separate, infrastructure-level EBS snapshot) - this is
-    #when the game itself last wrote the active world. No fixed world name is configured, so glob rather
-    #than hardcode one; .fwl is the small metadata file paired with each .db, included as a second signal.
+    #When the game itself last wrote the active world, as opposed to AWS Backup's EBS snapshot. No fixed
+    #world name is configured, so glob for it.
     try:
         candidates = glob.glob(SAVES_GLOB) + glob.glob(SAVES_GLOB[:-3] + ".fwl")
         mtimes = [os.path.getmtime(p) for p in candidates]
