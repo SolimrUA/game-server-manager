@@ -5,6 +5,7 @@
 import boto3
 import json
 import os
+import shlex
 import time
 
 
@@ -68,6 +69,10 @@ def lambda_handler(event, context): #standard function called on lambda invocati
             if not permitted:
                 return ("You don't have permission to download this server's world", info)
         elif command != "getInfo":
+            #covers reSize/backupNow/pauseIdleShutdown/resumeIdleShutdown/installMod/deleteMod - installing
+            #or removing a mod rewrites the server's actual content, which is closer to Resize/Backup Now
+            #than to a per-user-taggable action like Start/Stop or Download World (see
+            #docs/frontend-ui-ux-requirements.md's "Install/delete mods" section).
             return ("You don't have permission to perform this action", info)
 
     if event['command'] == "start":
@@ -211,6 +216,58 @@ def lambda_handler(event, context): #standard function called on lambda invocati
         if not s3Key.startswith(expectedPrefix):
             return {"status": "Failed", "error": "s3Key does not belong to this instance"}
         return getWorldDownloadStatus(commandId, targetInstance['InstanceId'], s3Key)
+    elif event['command'] == "installMod":
+        if not targetInstances:
+            return ("No matching instance found", info)
+        i = targetInstances[0]
+        gameName = i.get('GameName')
+        dataPath = i.get('DataPath')
+        modref = event.get('modref')
+        if not gameName or not dataPath or not modref:
+            return ("Missing instance/modref", info)
+        #Vintage Story's moddb requires the server's own game version as an explicit argument - confirmed
+        #live: omitting it makes the server try to look up "current" versions itself via a request that's
+        #been failing (a JSON parsing error inside the game's own moddb client). GameStatus.version is
+        #already reported by the status agent for exactly this kind of use.
+        gameVersion = (i.get('GameStatus') or {}).get('version')
+        try:
+            statusmessage = installMod(i['InstanceId'], gameName, dataPath, modref, gameVersion)
+        except Exception as e:
+            print("installMod failed: "+str(e))
+            statusmessage = "Couldn't install mod, please try again later"
+        return (statusmessage, info)
+    elif event['command'] == "deleteMod":
+        if not targetInstances:
+            return ("No matching instance found", info)
+        i = targetInstances[0]
+        gameName = i.get('GameName')
+        dataPath = i.get('DataPath')
+        modname = event.get('modname')
+        if not gameName or not dataPath or not modname:
+            return ("Missing instance/modname", info)
+        try:
+            statusmessage = deleteMod(i['InstanceId'], gameName, dataPath, modname)
+        except Exception as e:
+            print("deleteMod failed: "+str(e))
+            statusmessage = "Couldn't delete mod, please try again later"
+        return (statusmessage, info)
+    elif event['command'] == "restartGame":
+        #restarts just the game process/container, not the EC2 instance - e.g. to pick up a manually
+        #installed mod or a hand-edited config, without the ~minutes-long cost of a full instance
+        #stop/start. Reuses the same per-game restart mechanism installMod/deleteMod already use.
+        if not targetInstances:
+            return ("No matching instance found", info)
+        i = targetInstances[0]
+        gameName = i.get('GameName')
+        dataPath = i.get('DataPath')
+        if not gameName or not dataPath:
+            return ("Missing instance", info)
+        try:
+            statusmessage = restartGame(i['InstanceId'], gameName, dataPath)
+        except Exception as e:
+            print("restartGame failed: "+str(e))
+            statusmessage = "Couldn't restart the game, please try again later"
+        return (statusmessage, info)
     else:
         statusmessage = "Error - invalid invocation event received"
     return(statusmessage,info)
@@ -390,6 +447,293 @@ def getWorldDownloadStatus(commandId, instanceId, s3Key):
         }, ExpiresIn=900)
         return {"status": "Success", "url": url}
     return {"status": "Failed", "error": result.get('StandardErrorContent', '')[:500]}
+
+#Vintage Story mods live directly under DataPath/Mods (status_agent.py's own hardcoded MODS_PATH
+#convention - never tag-driven, so no new server-stack.yaml parameter needed here either).
+VS_MODS_SUBDIR = "Mods"
+
+#Resolves a mod's *display* name (what deleteMod's caller has, from GameStatus.mods - see
+#docs/server-status.md) to its modid (what /moddb remove actually needs - confirmed live these are
+#different: e.g. display name "Carry Capacity" vs modid "carrycapacity"). Scans the Mods folder and
+#re-derives each entry's display name exactly the way status_agent.py's read_mods() already does (a zip's
+#modinfo.json vs. an extracted folder's modinfo.json), so this matches the same entry the front-end is
+#showing, without duplicating a second name-matching implementation that could drift out of sync. Prints
+#the resolved modid (not the display name) on success so the calling shell script can feed it straight to
+#/moddb remove.
+VS_MOD_FIND_MODID_SCRIPT = r'''python3 - <<'PYEOF'
+import json, os, sys, zipfile
+
+MODS_PATH = {modsPath}
+target = {modname}
+
+def read_info(read_fn):
+    try:
+        return json.loads(read_fn())
+    except Exception:
+        return None
+
+modid = None
+if os.path.isdir(MODS_PATH):
+    for entry in os.listdir(MODS_PATH):
+        path = os.path.join(MODS_PATH, entry)
+        info = None
+        if entry.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(path) as zf:
+                    info = read_info(lambda: zf.read("modinfo.json").decode("utf-8"))
+            except Exception:
+                pass
+        elif os.path.isdir(path):
+            modinfo_path = os.path.join(path, "modinfo.json")
+            if os.path.exists(modinfo_path):
+                info = read_info(lambda: open(modinfo_path).read())
+        if info and (info.get("name") or info.get("Name")) == target:
+            modid = info.get("modid") or info.get("ModID") or info.get("Modid")
+            break
+
+if not modid:
+    print("NO_MATCH")
+    sys.exit(1)
+print(modid)
+PYEOF'''
+
+def installMod(instanceId, gameName, dataPath, modref, gameVersion=None):
+    #Both games' actual mod install has nothing to reimplement - Vintage Story has a built-in console
+    #command that resolves/downloads/validates (confirmed live: /moddb install <modid> <gameVersion> - the
+    #gameVersion argument is required, not optional: without it the server tries to look up "current"
+    #versions itself via a request that's been failing with a JSON parsing error inside the game's own
+    #moddb client), and Valheim's Odin already does the same from a MODS= list on every container start
+    #(the exact mechanism already running the mods installed manually earlier this session).
+    #
+    #Deliberately does NOT restart the game - confirmed with you: install/delete should never restart on
+    #their own. An admin installing several mods in a row would otherwise pay a restart per mod; instead
+    #they call the separate restartGame command once, whenever they're actually ready to load everything
+    #installed/removed so far.
+    if gameName == 'vintagestory':
+        if not gameVersion:
+            return "Couldn't determine the server's current game version - try again once the status agent has reported it"
+        serverCmd = 'moddb install ' + modref + ' ' + gameVersion
+        commands = [
+            'sudo -u vintagestory /home/vintagestory/server/server.sh command ' + shlex.quote(serverCmd),
+        ]
+    elif gameName == 'valheim':
+        composeFile = dataPath + '/docker-compose.yml'
+        script = VALHEIM_MOD_INSERT_SCRIPT.format(path=repr(composeFile), modref=repr(modref))
+        commands = [
+            #MODS only takes effect with TYPE=BepInEx already set (confirmed live earlier this session -
+            #Odin silently no-ops MODS entirely otherwise) - fail clearly and never touch the file if this
+            #isn't set, per the explicit decision not to auto-enable BepInEx.
+            'grep -q "^ *- TYPE=BepInEx$" ' + shlex.quote(composeFile) + ' || { echo "BepInEx is not enabled on this server - set TYPE=BepInEx in docker-compose.yml first" >&2; exit 1; }',
+            script,
+        ]
+    else:
+        return "Mod install isn't supported for "+str(gameName)
+    print("installMod: instanceId="+instanceId+" gameName="+gameName+" modref="+modref)
+    success, stdout, stderr = runSsmCommandSync(instanceId, commands)
+    #logged regardless of success - a shell exit code of 0 only means the commands themselves ran without
+    #a shell-level error, NOT that the game's own console command actually did anything (confirmed live:
+    #injecting a console command "succeeds" trivially every time, independent of whether the game itself
+    #installed the mod) - this is the one place that can actually show what the game's console printed
+    #back, until a real success/failure check replaces trusting the exit code.
+    print("installMod result: success="+str(success)+" stdout="+repr(stdout)+" stderr="+repr(stderr))
+    if success:
+        return "Mod install requested - restart the server (once you're ready) to load it"
+    return "Couldn't install mod: "+(stderr or stdout or "unknown error")[:300]
+
+def deleteMod(instanceId, gameName, dataPath, modname):
+    #Deliberately does NOT restart the game either - same reasoning as installMod: an admin removing
+    #several mods (or one of each) shouldn't pay a restart per action, only once via the separate
+    #restartGame command when they're actually ready.
+    if gameName == 'vintagestory':
+        #uses the game's own /moddb remove <modid> (confirmed live) rather than deleting the mod's
+        #file/folder directly - modname (the display name from GameStatus.mods) isn't what /moddb remove
+        #needs, so VS_MOD_FIND_MODID_SCRIPT resolves display name -> modid first, same matching logic as
+        #before, just repurposed to look up rather than delete.
+        findScript = VS_MOD_FIND_MODID_SCRIPT.format(modsPath=repr(dataPath+'/'+VS_MODS_SUBDIR), modname=repr(modname))
+        commands = [
+            #the heredoc's closing PYEOF must be alone on its own line for bash to recognize it as the
+            #terminator - the trailing "\n" before the closing ")" is required, not cosmetic; without it
+            #bash can't find a valid terminator line and silently reads to true end-of-script instead
+            #(confirmed locally: it happened to still work by coincidence, with a "here-document delimited
+            #by end-of-file" warning - too fragile to rely on).
+            'MODID=$(' + findScript + '\n)',
+            #the find script's own "NO_MATCH" print gets swallowed by the $(...) capture above (it becomes
+            #MODID's value, not part of this script's own stdout) - re-echo it so the failure-message
+            #check below (looking for "NO_MATCH" in the overall command's captured stdout) still works.
+            'if [ $? -ne 0 ]; then echo "NO_MATCH"; exit 1; fi',
+            'sudo -u vintagestory /home/vintagestory/server/server.sh command "moddb remove $MODID"',
+        ]
+    elif gameName == 'valheim':
+        composeFile = dataPath + '/docker-compose.yml'
+        script = VALHEIM_MOD_DELETE_SCRIPT.format(path=repr(composeFile), modname=repr(modname))
+        commands = [
+            script,
+        ]
+    else:
+        return "Mod delete isn't supported for "+str(gameName)
+    print("deleteMod: instanceId="+instanceId+" gameName="+gameName+" modname="+modname)
+    success, stdout, stderr = runSsmCommandSync(instanceId, commands)
+    print("deleteMod result: success="+str(success)+" stdout="+repr(stdout)+" stderr="+repr(stderr))
+    if success:
+        return "Mod removed - restart the server (once you're ready) for the change to take effect"
+    if 'NO_MATCH' in stdout:
+        return "Couldn't find a mod matching \""+modname+"\" to delete"
+    return "Couldn't delete mod: "+(stderr or stdout or "unknown error")[:300]
+
+def restartGame(instanceId, gameName, dataPath):
+    #just the game process/container, not the EC2 instance - the only place that actually restarts either
+    #game now (installMod/deleteMod deliberately don't - see their own comments). Confirmed live per-game
+    #mechanism: server.sh restart for Vintage Story; docker compose down/up for Valheim, consistent with
+    #its own graceful-stop timing elsewhere in this file. Backgrounded (setsid, redirected fds) since a
+    #real restart can take a while - Valheim's own graceful-stop grace period alone is 60s - and this SSM
+    #call should stay fast regardless.
+    if gameName == 'vintagestory':
+        commands = [
+            'setsid sh -c "sudo -u vintagestory /home/vintagestory/server/server.sh restart" </dev/null >/dev/null 2>&1 &',
+        ]
+    elif gameName == 'valheim':
+        commands = [
+            'setsid sh -c "cd ' + shlex.quote(dataPath) + ' && docker compose down && docker compose up -d" </dev/null >/dev/null 2>&1 &',
+        ]
+    else:
+        return "Restart isn't supported for "+str(gameName)
+    print("restartGame: instanceId="+instanceId+" gameName="+gameName)
+    success, stdout, stderr = runSsmCommandSync(instanceId, commands)
+    print("restartGame result: success="+str(success)+" stdout="+repr(stdout)+" stderr="+repr(stderr))
+    if success:
+        return "Restart requested - the server will be back in a minute or two"
+    return "Couldn't restart the game: "+(stderr or stdout or "unknown error")[:300]
+
+#docker-compose.yml's MODS value is a YAML block scalar (see valheim-prepare-data.sh in
+#scripts/Valheim/install.sh) - its first line carries the "MODS=" prefix, every following line at the
+#same indentation is a bare continuation entry. Both scripts below do one pass to collect every entry
+#(regardless of which physical line carried the "MODS=" prefix), then rewrite the whole block so "MODS="
+#always ends up back on the new first line - editing just the matched/inserted line in place would risk
+#losing that prefix entirely if it happened to land on the line being touched.
+VALHEIM_MOD_INSERT_SCRIPT = r'''python3 - <<'PYEOF'
+path = {path}
+modref = {modref}
+with open(path) as f:
+    lines = f.readlines()
+
+out = []
+i = 0
+inserted = False
+while i < len(lines):
+    line = lines[i]
+    stripped = line.strip()
+    if stripped.startswith("MODS="):
+        indent = line[:len(line) - len(line.lstrip())]
+        entries = [stripped[len("MODS="):]]
+        j = i + 1
+        while j < len(lines):
+            nxt = lines[j]
+            nxt_stripped = nxt.strip()
+            nxt_indent_len = len(nxt) - len(nxt.lstrip())
+            if nxt_stripped == "" or nxt_indent_len < len(indent):
+                break
+            entries.append(nxt_stripped)
+            j += 1
+        entries.append(modref)
+        out.append(indent + "MODS=" + entries[0] + "\n")
+        for e in entries[1:]:
+            out.append(indent + e + "\n")
+        inserted = True
+        i = j
+        continue
+    out.append(line)
+    i += 1
+
+if not inserted:
+    print("NO_MODS_BLOCK")
+    raise SystemExit(1)
+
+with open(path, "w") as f:
+    f.writelines(out)
+print("INSERTED")
+PYEOF'''
+
+VALHEIM_MOD_DELETE_SCRIPT = r'''python3 - <<'PYEOF'
+path = {path}
+target = {modname}
+with open(path) as f:
+    lines = f.readlines()
+
+out = []
+i = 0
+removed = False
+while i < len(lines):
+    line = lines[i]
+    stripped = line.strip()
+    if stripped.startswith("MODS="):
+        indent = line[:len(line) - len(line.lstrip())]
+        entries = [stripped[len("MODS="):]]
+        j = i + 1
+        while j < len(lines):
+            nxt = lines[j]
+            nxt_stripped = nxt.strip()
+            nxt_indent_len = len(nxt) - len(nxt.lstrip())
+            if nxt_stripped == "" or nxt_indent_len < len(indent):
+                break
+            entries.append(nxt_stripped)
+            j += 1
+        new_entries = []
+        for e in entries:
+            #Namespace-Name-Version, namespace/name never contain "-" per Thunderstore's own convention
+            #(already relied on elsewhere this session)
+            parts = e.split("-")
+            name = parts[1] if len(parts) >= 3 else None
+            if name == target and not removed:
+                removed = True
+                continue
+            new_entries.append(e)
+        if new_entries:
+            out.append(indent + "MODS=" + new_entries[0] + "\n")
+            for e in new_entries[1:]:
+                out.append(indent + e + "\n")
+        i = j
+        continue
+    out.append(line)
+    i += 1
+
+if not removed:
+    print("NO_MATCH")
+    raise SystemExit(1)
+
+with open(path, "w") as f:
+    f.writelines(out)
+print("REMOVED")
+PYEOF'''
+
+def runSsmCommandSync(instanceId, commands):
+    #shared by installMod/deleteMod - both are single synchronous SSM calls (unlike startWorldDownload's
+    #async start/poll pair), since the fast part (console command / file edit) is expected to finish in a
+    #couple seconds; the actual restart is always fired backgrounded within the command text itself so
+    #this wait never blocks on it (see docs/frontend-ui-ux-requirements.md's timing discussion).
+    #
+    #A manual poll loop, not ssm.get_waiter('command_executed') - that waiter's documented signature also
+    #wants a PluginName, which get_command_invocation itself has never needed here (getWorldDownloadStatus
+    #calls it the same way, proven live repeatedly this session) - reusing that exact shape avoids the
+    #open question of whether the waiter's PluginName is genuinely required. Bounded to fit comfortably
+    #inside StartStopLambda's own Timeout (13s).
+    response = ssm.send_command(
+        InstanceIds=[instanceId],
+        DocumentName='AWS-RunShellScript',
+        Parameters={'commands': commands},
+        TimeoutSeconds=60,
+    )
+    commandId = response['Command']['CommandId']
+    for _ in range(10):
+        try:
+            result = ssm.get_command_invocation(CommandId=commandId, InstanceId=instanceId)
+        except ssm.exceptions.InvocationDoesNotExist:
+            time.sleep(1)
+            continue
+        if result['Status'] in ('Pending', 'InProgress', 'Delayed'):
+            time.sleep(1)
+            continue
+        return result['Status'] == 'Success', result.get('StandardOutputContent', ''), result.get('StandardErrorContent', '')
+    return False, '', 'Timed out waiting for the command to complete'
 
 def updateDnsStateFunc(info):
     stepfunction = boto3.client('stepfunctions')

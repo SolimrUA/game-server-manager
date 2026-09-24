@@ -39,6 +39,17 @@ function mcGameDisplayName(gameName) {
   return gameName.charAt(0).toUpperCase() + gameName.slice(1);
 }
 
+// What an admin pastes into "Install Mod" differs per game's own mod site - see
+// docs/frontend-ui-ux-requirements.md's "Install/delete mods" section for the back-end side of this
+// (installmod/deletemod endpoints don't exist yet).
+var MC_MOD_SOURCE_HINT = {
+  'vintagestory': { placeholder: 'e.g. carrycapacity', label: 'Mod ID or slug from mods.vintagestory.at' },
+  'valheim': { placeholder: 'e.g. Smoothbrain-EquipmentAndQuickSlots', label: 'Full package name from thunderstore.io (Namespace-Name)' }
+};
+function mcModSourceHint(gameName) {
+  return MC_MOD_SOURCE_HINT[gameName] || { placeholder: 'mod identifier', label: 'Mod identifier' };
+}
+
 // The EC2 instance can be running before/without the game process itself being up (still installing,
 // crash-looping, etc) - this is deliberately a separate badge from the EC2 State one. See docs/server-status.md.
 function mcGameStatus(instance) {
@@ -115,6 +126,17 @@ function mcLifecycleButtonHtml(ec2State, permissionDenied) {
   return '<button class="btn ' + cls + ' mcLifecycleBtn"' + (disabled ? ' disabled' : '') + title + '>' + label + '</button>';
 }
 
+// Restarts just the game process/container, not the EC2 instance - e.g. to pick up a mod just
+// installed/removed or a hand-edited config, without the ~minutes-long cost of a full Stop/Start.
+// Admin-only (restartGame falls under the Lambda's generic admin-only permission bucket, same as Resize/
+// Backup Now/mods - not the UserLifecycleAllowed tag Start/Stop use), so gated by mcIsAdmin at the call
+// site, not shown here. `enabled` is false while the instance isn't running, same treatment as the other
+// lifecycle/mod controls.
+function mcRestartGameButtonHtml(enabled) {
+  var title = enabled ? 'Restart just the game process, not the EC2 instance' : 'Start the server to restart the game';
+  return '<button type="button" class="btn mcRestartGameBtn"' + (enabled ? '' : ' disabled') + ' title="' + title + '">Restart Game</button>';
+}
+
 // `scope` is 'full' (world save + mods + player data - everything WorldDownloadPaths lists) or 'core'
 // (world save only). Only one download can run at a time per instance either way - the SSM command zips
 // to a fixed /tmp path on the instance, so a second one while the first is still running would collide -
@@ -131,6 +153,10 @@ function mcDownloadWorldButtonHtml(instanceId, scope, label, permissionDenied) {
 var MC_COPY_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none">' +
   '<rect x="4" y="4" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>' +
   '<path d="M3 9.5V2.5C3 1.94772 3.44772 1.5 4 1.5H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+  '</svg>';
+
+var MC_DELETE_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 10 10" fill="none">' +
+  '<path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
   '</svg>';
 
 async function mcCopyToClipboard(text) {
@@ -221,15 +247,33 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
-// mods: array of {name, version} from GameStatus - see docs/server-status.md
-function renderModsList(mods) {
+// mods: array of {name, version} from GameStatus - see docs/server-status.md. `canDelete` shows a remove
+// icon per mod (admin-only - see canManageMods in renderTable); `enabled` disables it while the instance
+// isn't running, same treatment as the lifecycle/download buttons (visible but inert, not hidden).
+function renderModsList(mods, canDelete, enabled) {
   if (!mods || mods.length === 0) {
     return '<p class="mcModsEmpty">No mod info available yet.</p>';
   }
   return '<ul class="mcModsList">' + mods.map(function (mod) {
     var version = mod.version ? ' <span class="mcModVersion">v' + escapeHtml(mod.version) + '</span>' : '';
-    return '<li>' + escapeHtml(mod.name) + version + '</li>';
+    var title = enabled ? 'Remove this mod' : 'Start the server to remove mods';
+    var deleteBtn = canDelete ?
+      ' <button type="button" class="mcModDeleteBtn" data-mod-name="' + escapeHtml(mod.name) + '"' + (enabled ? '' : ' disabled') +
+      ' title="' + title + '">' + MC_DELETE_ICON_SVG + '</button>' : '';
+    return '<li>' + escapeHtml(mod.name) + version + deleteBtn + '</li>';
   }).join('') + '</ul>';
+}
+
+// Placed below the mod list/form - `gameName` picks the right hint text for what to paste (see
+// mcModSourceHint above); `enabled` is false while the EC2 instance isn't running (mod install/delete
+// goes through SSM Run Command on the instance, the same as Backup Now/Download World).
+function mcInstallModFormHtml(gameName, enabled) {
+  var hint = mcModSourceHint(gameName);
+  return '<div class="mcInstallModForm">' +
+    '<input type="text" class="mcModRefInput" placeholder="' + escapeHtml(hint.placeholder) + '"' + (enabled ? '' : ' disabled') + '>' +
+    '<button type="button" class="btn mcInstallModBtn"' + (enabled ? '' : ' disabled') + '>Install</button>' +
+    '</div>' +
+    '<p class="mcModSourceHint">' + escapeHtml(hint.label) + (enabled ? '' : ' — start the server to install or remove mods') + '</p>';
 }
 
 // Renders one row per instance, preserving which row (if any) is currently expanded
@@ -244,6 +288,12 @@ async function renderTable(data) {
     var previouslyActiveDetail = previouslySelectedRow && previouslySelectedRow.nextElementSibling;
     var previouslyActiveTabEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcTab.active');
     var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
+    // Same rebuild-wipes-live-state problem as the selection/tab above, but for text actually being typed:
+    // the periodic refresh tears down and rebuilds every row's markup from scratch, which would otherwise
+    // silently erase whatever the admin is mid-typing into the Install Mod field a few seconds later.
+    var previouslyModRefEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcModRefInput');
+    var previouslyModRefValue = previouslyModRefEl ? previouslyModRefEl.value : '';
+    var previouslyModRefFocused = previouslyModRefEl === document.activeElement;
 
     if (instances.length === 0) {
       tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
@@ -262,6 +312,12 @@ async function renderTable(data) {
       var idlePaused = instance['IdleShutdownStatus'] === 'disabled';
       var canLifecycle = mcIsAdmin || instance['UserLifecycleAllowed'];
       var canDownload = mcIsAdmin || instance['UserDownloadsAllowed'];
+      // Install/delete rewrites the server's actual content, not just start/stop or a read-only download -
+      // admin-only, no per-user override (see docs/frontend-ui-ux-requirements.md). Separate from whether
+      // the instance is actually running right now, which just disables the controls (same treatment as
+      // mcLifecycleButtonHtml/mcDownloadWorldButtonHtml - visible but inert, not hidden).
+      var canManageMods = mcIsAdmin;
+      var modsRunning = ec2State === 'running';
       var playersText = status && status.players && status.players.current != null
         ? status.players.current + (status.players.max != null ? ' / ' + status.players.max : '')
         : '—';
@@ -309,7 +365,10 @@ async function renderTable(data) {
             (canDownload ?
               mcDownloadWorldButtonHtml(instanceId, 'full', 'Download (All Data)') +
               mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)') +
-              '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '')) : '') +
+              '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '') +
+            // Restarts the game process, not EC2 power state - Data rather than Power since it's grouped
+            // with the other "acts on the server's live content/state" actions, not instance lifecycle.
+            (mcIsAdmin ? mcRestartGameButtonHtml(modsRunning) : '')) : '') +
         (mcIsAdmin ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
@@ -339,7 +398,15 @@ async function renderTable(data) {
         '</div>' +
         '<div class="mcTabPanel mcKvGrid" data-tab-panel="overview">' + overviewHtml + '</div>' +
         '<div class="mcTabPanel mcActionClusters" data-tab-panel="actions">' + actionClusters + '</div>' +
-        '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' + renderModsList(status && status.mods) + '</div>' +
+        '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' +
+          renderModsList(status && status.mods, canManageMods, modsRunning) +
+          (canManageMods ?
+            mcInstallModFormHtml(instance['GameName'], modsRunning) +
+            '<p class="mcModsNote">Installing or removing a mod here can take a minute or two to show up in the list above. ' +
+            'Changes only take effect after a restart:</p>' +
+            mcRestartGameButtonHtml(modsRunning)
+            : '') +
+        '</div>' +
         '</td>';
 
       detailRow.querySelectorAll('.mcTab').forEach(function (tab) {
@@ -377,6 +444,45 @@ async function renderTable(data) {
       };
       var retryLink = detailRow.querySelector('.mcRetryWorldDownloadCheck');
       if (retryLink) retryLink.onclick = function (e) { e.stopPropagation(); retryWorldDownload(instanceId); };
+
+      var modRefInput = detailRow.querySelector('.mcModRefInput');
+      if (modRefInput && instanceId === previouslySelectedInstanceId && previouslyModRefValue) {
+        modRefInput.value = previouslyModRefValue;
+        if (previouslyModRefFocused) {
+          modRefInput.focus();
+          modRefInput.setSelectionRange(modRefInput.value.length, modRefInput.value.length);
+        }
+      }
+      var installModBtn = detailRow.querySelector('.mcInstallModBtn');
+      if (installModBtn && !installModBtn.disabled) installModBtn.onclick = function (e) {
+        e.stopPropagation();
+        var modRef = modRefInput.value.trim();
+        if (!modRef) return;
+        showAlert('Installing mod…');
+        installMod(instanceId, modRef);
+      };
+      detailRow.querySelectorAll('.mcModDeleteBtn').forEach(function (btn) {
+        if (btn.disabled) return;
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          var modName = btn.dataset.modName;
+          if (!window.confirm('Remove mod "' + modName + '" from this server?')) return;
+          showAlert('Removing mod…');
+          deleteMod(instanceId, modName);
+        };
+      });
+
+      // Appears both in the Power cluster and again in the Mods tab (see mcRestartGameButtonHtml) -
+      // clicking either does the same thing.
+      detailRow.querySelectorAll('.mcRestartGameBtn').forEach(function (btn) {
+        if (btn.disabled) return;
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          showAlert('Restarting the game…');
+          restartGame(instanceId);
+        };
+      });
+
       detailRow.onclick = function (e) { e.stopPropagation(); };
 
       tbody.appendChild(row);
@@ -502,6 +608,74 @@ async function backupNow(instanceId) {
   var jwt = await getJwt();
 
   var msg = await fetch(backupUrl, {
+    method: 'get',
+    headers: new Headers({
+      'Authorization': jwt
+    })
+  });
+
+  var msgdata = await msg.json();
+  showAlert(msgdata[0]);
+
+  for (y=0; y<6; y++){
+    await sleep(1000);
+    mcInfo(API_URL, jwt);
+  }
+}
+
+// NOTE: installmod/deletemod don't exist on the back end yet - see docs/frontend-ui-ux-requirements.md's
+// "Install/delete mods" section. modRef is whatever the admin pasted (a ModDB id/slug for Vintage Story, a
+// "Namespace-Name" package name for Valheim - see mcModSourceHint) and is resolved to a download server-side.
+async function installMod(instanceId, modRef) {
+  var url = API_URL + "installmod/" + query_string +
+    (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "") + "&modref=" + encodeURIComponent(modRef);
+  var jwt = await getJwt();
+
+  var msg = await fetch(url, {
+    method: 'get',
+    headers: new Headers({
+      'Authorization': jwt
+    })
+  });
+
+  var msgdata = await msg.json();
+  showAlert(msgdata[0]);
+
+  for (y=0; y<6; y++){
+    await sleep(1000);
+    mcInfo(API_URL, jwt);
+  }
+}
+
+async function deleteMod(instanceId, modName) {
+  var url = API_URL + "deletemod/" + query_string +
+    (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "") + "&modname=" + encodeURIComponent(modName);
+  var jwt = await getJwt();
+
+  var msg = await fetch(url, {
+    method: 'get',
+    headers: new Headers({
+      'Authorization': jwt
+    })
+  });
+
+  var msgdata = await msg.json();
+  showAlert(msgdata[0]);
+
+  for (y=0; y<6; y++){
+    await sleep(1000);
+    mcInfo(API_URL, jwt);
+  }
+}
+
+// Restarts just the game process/container - the EC2 instance itself stays running throughout, so this
+// is a few seconds to kick off rather than the minutes a full Stop/Start takes. See restartGame in
+// Lambda/gaming_server_start_stop-v1_0.py.
+async function restartGame(instanceId) {
+  var url = API_URL + "restartgame/" + query_string + (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "");
+  var jwt = await getJwt();
+
+  var msg = await fetch(url, {
     method: 'get',
     headers: new Headers({
       'Authorization': jwt

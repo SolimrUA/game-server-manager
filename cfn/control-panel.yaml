@@ -125,9 +125,9 @@ Resources:
   #to the "prod" stage on its own - CloudFormation only republishes when this resource is actually
   #replaced (changing a property like Description isn't enough - it just patches the existing deployment's
   #metadata in place, still serving the stale snapshot). The reliable way to force a genuinely new
-  #deployment is bumping THIS RESOURCE'S OWN LOGICAL ID (currently Rev6) - that makes CloudFormation create
+  #deployment is bumping THIS RESOURCE'S OWN LOGICAL ID (currently Rev9) - that makes CloudFormation create
   #a new resource rather than update the existing one. Next endpoint change: rename this to
-  #ControlApiDeploymentRev7, and so on, AND add its GET method to DependsOn below.
+  #ControlApiDeploymentRev10, and so on, AND add its GET method to DependsOn below.
   #
   #Second bug, found after the first "fix": DependsOn previously listed only ApiGetInfoGetMethod. With no
   #dependency on the OTHER GET methods, CloudFormation has no guarantee it finishes creating them before
@@ -143,7 +143,9 @@ Resources:
   #Rev7: added the cognito:groups claim passthrough (two-tier admin/users access control) to every GET
   #method's RequestTemplates - no new endpoints, but changing an existing method's Integration still needs
   #this bump per the rule above.
-  ControlApiDeploymentRev7:
+  #Rev8: added installmod/deletemod.
+  #Rev9: added restartgame.
+  ControlApiDeploymentRev9:
     DependsOn:
       - ApiGetInfoGetMethod
       - ApiStartGetMethod
@@ -154,6 +156,9 @@ Resources:
       - ApiDownloadWorldStatusGetMethod
       - ApiPauseIdleShutdownGetMethod
       - ApiResumeIdleShutdownGetMethod
+      - ApiInstallModGetMethod
+      - ApiDeleteModGetMethod
+      - ApiRestartGameGetMethod
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
       RestApiId: !Ref ControlApi
@@ -221,6 +226,33 @@ Resources:
         - ControlApi
         - RootResourceId
       PathPart: backupnow
+      RestApiId: !Ref ControlApi
+
+  ControlApiResInstallMod:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: installmod
+      RestApiId: !Ref ControlApi
+
+  ControlApiResDeleteMod:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: deletemod
+      RestApiId: !Ref ControlApi
+
+  ControlApiResRestartGame:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt
+        - ControlApi
+        - RootResourceId
+      PathPart: restartgame
       RestApiId: !Ref ControlApi
 
   ControlApiResDownloadWorldStart:
@@ -594,6 +626,221 @@ Resources:
             method.response.header.Access-Control-Allow-Methods : false
       OperationName: BackupNowOPTIONS
       ResourceId: !Ref ControlApiResBackupNow
+      RestApiId: !Ref ControlApi
+
+  ApiInstallModGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"installMod\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"modref\": \"$input.params('modref')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: InstallMod
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+        method.request.querystring.modref : false
+      ResourceId: !Ref ControlApiResInstallMod
+      RestApiId: !Ref ControlApi
+
+  ApiInstallModOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: InstallModOPTIONS
+      ResourceId: !Ref ControlApiResInstallMod
+      RestApiId: !Ref ControlApi
+
+  ApiDeleteModGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"deleteMod\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"modname\": \"$input.params('modname')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: DeleteMod
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+        method.request.querystring.modname : false
+      ResourceId: !Ref ControlApiResDeleteMod
+      RestApiId: !Ref ControlApi
+
+  ApiDeleteModOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: DeleteModOPTIONS
+      ResourceId: !Ref ControlApiResDeleteMod
+      RestApiId: !Ref ControlApi
+
+  ApiRestartGameGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthoriser
+      HttpMethod: GET
+      Integration:
+          IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_TEMPLATES
+          RequestTemplates:
+            application/json : "{\r\n \"command\": \"restartGame\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
+          TimeoutInMillis: 15000
+          Type: AWS
+          Uri: !Sub
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+            - lambdaArn: !GetAtt StartStopLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin : false
+      OperationName: RestartGame
+      RequestParameters:
+        method.request.querystring.tagname : false
+        method.request.querystring.tagvalue : false
+        method.request.querystring.instanceid : false
+      ResourceId: !Ref ControlApiResRestartGame
+      RestApiId: !Ref ControlApi
+
+  ApiRestartGameOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Origin : "'*'"
+                method.response.header.Access-Control-Allow-Credentials : "'true'"
+                method.response.header.Access-Control-Allow-Methods : "'GET,OPTIONS'"
+              ResponseTemplates:
+                application/json : ''
+          PassthroughBehavior: WHEN_NO_MATCH
+          RequestTemplates:
+            application/json : '{"statusCode": 200}'
+          TimeoutInMillis: 15000
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json : 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers : false
+            method.response.header.Access-Control-Allow-Origin : false
+            method.response.header.Access-Control-Allow-Credentials : false
+            method.response.header.Access-Control-Allow-Methods : false
+      OperationName: RestartGameOPTIONS
+      ResourceId: !Ref ControlApiResRestartGame
       RestApiId: !Ref ControlApi
 
   ApiPauseIdleShutdownGetMethod:
@@ -1467,7 +1714,12 @@ Resources:
       PackageType: Zip
       Role: !GetAtt StartStopLambdaIamRole.Arn
       Runtime: python3.8
-      Timeout: 10
+      #bumped from 10 for installMod/deleteMod's synchronous SSM wait (ssm.get_waiter('command_executed'))
+      #- the actual work (console command injection / file edit) is fast, but the waiter's own polling
+      #granularity plus normal SSM round-trip latency needs a bit more headroom. Kept under the 15000ms
+      #API Gateway integration timeout on every method so the Lambda's own timeout is what reports
+      #cleanly, not a generic API Gateway 504.
+      Timeout: 13
 
   UpdateDnsLambda:
     Type: 'AWS::Lambda::Function'
@@ -1630,6 +1882,30 @@ Resources:
       FunctionName: !GetAtt StartStopLambda.Arn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/backupnow
+
+  StartStopLambdaPermissionInstallMod:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/installmod
+
+  StartStopLambdaPermissionDeleteMod:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/deletemod
+
+  StartStopLambdaPermissionRestartGame:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt StartStopLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ControlApi}/*/GET/restartgame
 
   StartStopLambdaPermissionPauseIdleShutdown:
     Type: AWS::Lambda::Permission

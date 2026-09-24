@@ -395,10 +395,13 @@ tr.mcServerDetail td {
 }
 
 .mcModsList li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     background: var(--white);
     border: 1px solid var(--grey-2);
     border-radius: 20px;
-    padding: 4px 12px;
+    padding: 4px 8px 4px 12px;
     font-size: 13px;
 }
 
@@ -407,8 +410,51 @@ tr.mcServerDetail td {
 }
 
 .mcModsEmpty {
-    margin: 0;
+    margin: 0 0 16px;
     font-size: 13px;
+    color: var(--grey-3);
+}
+
+.mcModDeleteBtn {
+    display: inline-flex;
+    align-items: center;
+    border: none;
+    background: none;
+    padding: 2px;
+    margin: 0;
+    cursor: pointer;
+    color: var(--grey-3);
+}
+
+.mcModDeleteBtn:hover:not(:disabled) {
+    color: #C0392B;
+}
+
+.mcModDeleteBtn:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+}
+
+.mcInstallModForm {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.mcModRefInput {
+    flex: 1;
+    max-width: 360px;
+    border: 1px solid var(--grey-2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.mcModSourceHint,
+.mcModsNote {
+    margin: 6px 0 0;
+    font-size: 12px;
     color: var(--grey-3);
 }
 
