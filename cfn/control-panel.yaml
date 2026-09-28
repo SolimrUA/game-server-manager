@@ -126,11 +126,11 @@ Resources:
   #its properties just patches the existing deployment in place, still serving the stale snapshot.
   #
   #So every change to any method or resource in this API needs two things here: bump this resource's own
-  #LOGICAL ID (ControlApiDeploymentRev10 -> Rev11, which is what forces the replacement), and list that
+  #LOGICAL ID (ControlApiDeploymentRev11 -> Rev12, which is what forces the replacement), and list that
   #method in DependsOn below. DependsOn must name every GET method, not just one: for methods created in
   #the same update that replaces this deployment, CloudFormation is otherwise free to snapshot before
   #they exist, and the missing endpoints answer 403 "Missing Authentication Token".
-  ControlApiDeploymentRev10:
+  ControlApiDeploymentRev11:
     DependsOn:
       - ApiGetInfoGetMethod
       - ApiStartGetMethod
@@ -1068,7 +1068,7 @@ Resources:
                 application/json : ''
           PassthroughBehavior: WHEN_NO_TEMPLATES
           RequestTemplates:
-            application/json : "{\r\n \"command\": \"startWorldDownload\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
+            application/json : "{\r\n \"command\": \"startWorldDownload\",\r\n \"tagName\": \"$input.params('tagname')\",\r\n \"tagValue\": \"$input.params('tagvalue')\",\r\n \"instanceId\": \"$input.params('instanceid')\",\r\n \"scope\": \"$input.params('scope')\",\r\n \"groups\": \"$context.authorizer.claims.get('cognito:groups')\"\r\n}"
           TimeoutInMillis: 15000
           Type: AWS
           Uri: !Sub
@@ -1085,6 +1085,7 @@ Resources:
         method.request.querystring.tagname : false
         method.request.querystring.tagvalue : false
         method.request.querystring.instanceid : false
+        method.request.querystring.scope : false
       ResourceId: !Ref ControlApiResDownloadWorldStart
       RestApiId: !Ref ControlApi
 

@@ -354,13 +354,49 @@ def startWorldDownload(instanceId, gameName, dataPath, includePaths, scope):
     #scope-independent.
     bucket = os.environ.get('statusBucket')
     key = 'worlds/'+gameName+'/'+instanceId+'-'+scope+'-'+str(int(time.time()))+'.zip'
-    folders = ' '.join('"'+p.strip()+'"' for p in includePaths.split(','))
-    commands = [
-        #A brand new world may not have every folder yet; `zip -r ... f1 f2 f3` would fail on the lot.
-        'cd '+dataPath+' && for p in '+folders+'; do [ -e "$p" ] && zip -r /tmp/worldsave.zip "$p"; done',
-        'aws s3 cp /tmp/worldsave.zip s3://'+bucket+'/'+key,
-        'rm -f /tmp/worldsave.zip',
-    ]
+    if gameName == 'vintagestory' and scope == 'core':
+        #Vintage Story's own /genbackup console command produces one consistent snapshot file,
+        #avoiding both the Saves folder's other worlds/backups/screenshots and any risk of missing
+        #writes still sitting in the live save's -wal file.
+        backupName = 'manualbackup-'+time.strftime('%Y-%m-%d-%H%M', time.gmtime())
+        backupFile = dataPath+'/Backups/'+backupName
+        commands = [
+            'cd '+dataPath,
+            'sudo -u vintagestory /home/vintagestory/server/server.sh command '+shlex.quote('genbackup '+backupName),
+            #genbackup runs async - poll for the file to appear and its size to stop changing
+            'BACKUP_FILE='+shlex.quote(backupFile),
+            'for i in $(seq 1 100); do '
+                'if [ -f "$BACKUP_FILE" ]; then '
+                    'S1=$(stat -c%s "$BACKUP_FILE"); sleep 3; S2=$(stat -c%s "$BACKUP_FILE"); '
+                    '[ "$S1" = "$S2" ] && break; '
+                'fi; '
+                'sleep 3; '
+            'done',
+            'if [ ! -f "$BACKUP_FILE" ]; then echo "genbackup never produced a file" >&2; exit 1; fi',
+            'cp "$BACKUP_FILE" /tmp/world.vcdbs',
+            'rm -f "$BACKUP_FILE"',
+            'zip -j /tmp/worldsave.zip /tmp/world.vcdbs',
+            'rm -f /tmp/world.vcdbs',
+            'aws s3 cp /tmp/worldsave.zip s3://'+bucket+'/'+key,
+            'rm -f /tmp/worldsave.zip',
+        ]
+    else:
+        folders = ' '.join('"'+p.strip()+'"' for p in includePaths.split(','))
+        commands = [
+            #A brand new world may not have every folder yet; `zip -r ... f1 f2 f3` would fail on the lot.
+            'cd '+dataPath+' && for p in '+folders+'; do [ -e "$p" ] && zip -r /tmp/worldsave.zip "$p"; done',
+        ]
+        if gameName == 'vintagestory' and scope == 'full':
+            #serverconfig.json holds the join password - zip a redacted temp copy, never the real file
+            commands += [
+                'jq "del(.Password)" '+dataPath+'/serverconfig.json > /tmp/serverconfig-redacted.json',
+                'zip -j /tmp/worldsave.zip /tmp/serverconfig-redacted.json',
+                'rm -f /tmp/serverconfig-redacted.json',
+            ]
+        commands += [
+            'aws s3 cp /tmp/worldsave.zip s3://'+bucket+'/'+key,
+            'rm -f /tmp/worldsave.zip',
+        ]
     #SSM defaults to 3600s, too short for a multi-GB world (its own max is 172800).
     response = ssm.send_command(
         InstanceIds=[instanceId],
