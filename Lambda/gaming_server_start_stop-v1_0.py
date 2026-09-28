@@ -3,6 +3,7 @@
 
 
 import boto3
+from datetime import datetime, timezone
 import json
 import os
 import shlex
@@ -282,7 +283,7 @@ def getInfo(tagKey, tagValue):
                 infoDict['DataPath'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'data-path'), None)
                 infoDict['WorldDownloadPaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-paths'), None)
                 infoDict['WorldDownloadCorePaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-core-paths'), None)
-                infoDict['GameStatus'] = getGameStatus(gameName) if infoDict['State'] == 'running' else None
+                infoDict['GameStatus'] = getGameStatus(gameName, instance.get('LaunchTime')) if infoDict['State'] == 'running' else None
                 #Promoted out of GameStatus: the front end's Server Name column reads it top-level.
                 infoDict['ServerName'] = infoDict['GameStatus'].get('serverName') if infoDict['GameStatus'] else None
                 infoDict['LastBackupTime'] = getLastBackupTime(gameName)
@@ -293,16 +294,24 @@ def getInfo(tagKey, tagValue):
                 info["Instances"].append(infoDict)
     return(info)
 
-def getGameStatus(gameName):
+def getGameStatus(gameName, launchTime):
     statusBucket = os.environ.get('statusBucket')
     if not statusBucket or not gameName:
         return None
     try:
         obj = s3.get_object(Bucket=statusBucket, Key='status/'+gameName+'.json')
-        return json.loads(obj['Body'].read())
+        status = json.loads(obj['Body'].read())
     except Exception as e:
         print("No game status available for "+str(gameName)+": "+str(e))
         return None
+    #A status pushed before this boot is stale.
+    try:
+        pushedAt = datetime.strptime(status['updatedAt'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        if launchTime and pushedAt < launchTime:
+            return None
+    except Exception:
+        pass
+    return status
 
 def getLastBackupTime(gameName):
     #cfn/server-stack.yaml names vaults by a fixed convention, so this needs no lookup.
