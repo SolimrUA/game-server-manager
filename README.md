@@ -25,6 +25,8 @@ The solution is split into three CloudFormation templates under [`cfn/`](cfn/):
 
 Each server also reports live player count, game version, and installed mods to the control panel - see [`docs/server-status.md`](docs/server-status.md) for the data flow and how to add reporting for a new game.
 
+Access is per user, per server, assigned from the control panel's own Access page rather than at deploy time - see [`docs/access.md`](docs/access.md).
+
 The Control Panel has no CloudFormation-level dependency on any Server stack - it discovers which EC2 instances to manage by an EC2 tag (`IdTagName`/`IdTagValue`) at runtime. That tag must be entered identically on the Control Panel stack and every Server stack. `HostedZoneId` must likewise match between the Control Panel stack and any Server stack using a custom `Domain`.
 
 ## Deploying
@@ -81,11 +83,15 @@ Re-run `cdk deploy` here any time you change a script, Lambda code, or the front
 
 ### 3. Control Panel - once, and again whenever the Lambda code changes
 
+This template is past CloudFormation's 51,200-byte limit for an inline template, so it has to be staged in a bucket you control - the assets bucket from step 2 will do:
+
 ```bash
 aws cloudformation deploy \
   --template-file cfn/control-panel.yaml \
   --stack-name game-server-controlpanel-cfn \
   --capabilities CAPABILITY_IAM \
+  --s3-bucket <AssetBucketName FROM STEP 2> \
+  --s3-prefix cfn-deploy-staging \
   --parameter-overrides \
       AssetsBucketName=<AssetBucketName FROM STEP 2> \
       AssetsKeyPrefix=<AssetKeyPrefix FROM STEP 2> \
@@ -130,12 +136,12 @@ aws ec2 wait instance-stopped --instance-ids <INSTANCE_ID>
 
 # 3. tear down just the instance - the data volume, backups, IAM, etc. all stay
 aws cloudformation deploy --template-file cfn/server-stack.yaml \
-  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_IAM \
+  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides CreateInstance=false
 
 # 4. bring up a fresh instance - the volume reattaches (not reformats)
 aws cloudformation deploy --template-file cfn/server-stack.yaml \
-  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_IAM \
+  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides CreateInstance=true \
       GameServerSha256=<ValheimSha256 or VintageStoryInstallSha256 FROM STEP 2>
 ```

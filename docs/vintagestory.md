@@ -8,7 +8,7 @@ Vintage Story needs both TCP and UDP on port 42420, which is not what the templa
 aws cloudformation deploy \
   --template-file cfn/server-stack.yaml \
   --stack-name game-server-vintagestory-cfn \
-  --capabilities CAPABILITY_IAM \
+  --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
       GameName=vintagestory \
       GameServer=<ScriptsBaseUrl FROM CdkAssetPublisher>/VintageStory/install.sh \

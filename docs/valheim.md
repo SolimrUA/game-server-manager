@@ -6,7 +6,7 @@ Requires the Common stack, [published assets](../README.md#2-publish-your-assets
 aws cloudformation deploy \
   --template-file cfn/server-stack.yaml \
   --stack-name game-server-valheim-cfn \
-  --capabilities CAPABILITY_IAM \
+  --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
       GameName=valheim \
       GameServer=<ScriptsBaseUrl FROM CdkAssetPublisher>/Valheim/install.sh \

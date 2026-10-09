@@ -504,3 +504,131 @@ tr.mcServerDetail td {
     font-size: 14px;
 }
 
+
+/* ############## Access grid ############## */
+
+.mcAccessHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.mcAccessActions {
+    display: flex;
+    gap: 8px;
+}
+
+#mcAccessIntro {
+    margin: 0 0 16px;
+    font-size: 13px;
+}
+
+/* The grid grows a column per server, so it gets its own scroller rather than widening the page. */
+.mcAccessGridWrap {
+    overflow-x: auto;
+}
+
+table.mcAccessGrid thead th {
+    text-align: center;
+    white-space: nowrap;
+}
+
+table.mcAccessGrid thead th:first-child,
+table.mcAccessGrid tbody td:first-child {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    background: var(--white);
+    z-index: 1;
+}
+
+table.mcAccessGrid thead th:first-child {
+    background: var(--grey-1);
+}
+
+table.mcAccessGrid tbody tr:hover td {
+    background: var(--grey-1);
+}
+
+.mcAccessServerGame {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.mcAccessUserCell {
+    white-space: nowrap;
+}
+
+.mcAccessUserName {
+    font-weight: 600;
+}
+
+.mcAccessUserEmail {
+    display: block;
+    font-size: 12px;
+}
+
+.mcAccessRename {
+    background: none;
+    border: 0;
+    cursor: pointer;
+    color: var(--grey-3);
+    font-size: 13px;
+    padding: 0 4px;
+}
+
+.mcAccessRename:hover {
+    color: var(--cyan-dark);
+}
+
+.mcAccessCell {
+    text-align: center;
+}
+
+.mcAccessSelect {
+    padding: 5px 8px;
+    border: 1px solid var(--grey-2);
+    border-radius: 4px;
+    background: var(--white);
+    font-size: 13px;
+    min-width: 92px;
+}
+
+/* An edited cell stays visibly unsaved until Save or Revert resolves it. */
+.mcAccessSelect.mcAccessDirty {
+    border-color: var(--cyan-dark);
+    box-shadow: 0 0 0 2px #E3F6FF;
+}
+
+.mcAccessRowActions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.mcAccessRowActions .btn {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.top-nav a.active {
+    font-weight: 600;
+}
+
+.mcAccessUserName.mcAccessDirty {
+    border-bottom: 2px solid var(--cyan-dark);
+}
+
+.mcAccessUnsaved {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #FFF3D6;
+    color: #92650A;
+    font-size: 11px;
+    font-weight: 600;
+}

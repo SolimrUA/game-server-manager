@@ -34,8 +34,6 @@ Metadata:
           - Domain
           - IdTagValue
           - CreateInstance
-          - AllowUserLifecycle
-          - AllowUserDownloads
       - Label:
           default: You should not need to change anything in this section.
         Parameters:
@@ -68,10 +66,6 @@ Metadata:
         default: How many Gibibytes for your persistent world/mod data volume? Never lower this once set.
       CreateInstance:
         default: Leave as true. Toggle to false then back to true to force a fresh instance without losing your data volume.
-      AllowUserLifecycle:
-        default: Let non-admin Control Panel users Start/Stop this game's server? (admins can always do this)
-      AllowUserDownloads:
-        default: Let non-admin Control Panel users Download World for this game's server? (admins can always do this)
       KeyName:
         default: Select the key pair you will use to access server OS
       Domain:
@@ -155,24 +149,6 @@ Parameters:
       Leave as true for normal use. Set to false, deploy, then back to true and deploy again to force a
       fresh instance (e.g. to pick up an updated GameServer script) without deleting this whole stack -
       the persistent data volume and everything else stays intact throughout, only the compute is replaced.
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Default: 'true'
-    Type: String
-  AllowUserLifecycle:
-    Description: >-
-      Whether non-admin ("users" group) Cognito accounts may Start/Stop this specific game's server from
-      the Control Panel. Admins can always do this regardless of this setting.
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Default: 'false'
-    Type: String
-  AllowUserDownloads:
-    Description: >-
-      Whether non-admin ("users" group) Cognito accounts may Download World for this specific game's
-      server from the Control Panel. Admins can always do this regardless of this setting.
     AllowedValues:
       - 'true'
       - 'false'
@@ -340,10 +316,6 @@ Resources:
           Value: !Ref WorldDownloadPaths
         - Key: world-download-core-paths
           Value: !Ref WorldDownloadCorePaths
-        - Key: user-lifecycle-allowed
-          Value: !Ref AllowUserLifecycle
-        - Key: user-downloads-allowed
-          Value: !Ref AllowUserDownloads
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:

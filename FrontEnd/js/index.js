@@ -1,9 +1,16 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-//Only drives which buttons render - the Lambda re-checks the caller's groups itself and is the real
-//security boundary.
+//Only drives which buttons render - the Lambda re-checks every request itself and is the real security
+//boundary.
 var mcIsAdmin = false;
+
+//getInfo resolves the caller's access template per server and returns the capabilities it grants, so the
+//front end never needs to know what a template contains.
+function mcCan(instance, capability) {
+  var capabilities = (instance && instance['Capabilities']) || [];
+  return capabilities.indexOf(capability) !== -1;
+}
 
 async function mcInfo(url, idToken) {
 
@@ -265,10 +272,12 @@ async function renderTable(data) {
       var gameStatus = mcGameStatus(instance);
       var idleStatus = mcIdleShutdownStatus(instance);
       var idlePaused = instance['IdleShutdownStatus'] === 'disabled';
-      var canLifecycle = mcIsAdmin || instance['UserLifecycleAllowed'];
-      var canDownload = mcIsAdmin || instance['UserDownloadsAllowed'];
-      // Installing or deleting a mod rewrites the server's content: admin-only, no per-user override.
-      var canManageMods = mcIsAdmin;
+      var canLifecycle = mcCan(instance, 'lifecycle');
+      var canDownload = mcCan(instance, 'download');
+      var canContent = mcCan(instance, 'content');
+      var canBackup = mcCan(instance, 'backup');
+      var canAutoShutdown = mcCan(instance, 'autoshutdown');
+      var canResize = mcCan(instance, 'resize');
       var modsRunning = ec2State === 'running';
       var playersText = status && status.players && status.players.current != null
         ? status.players.current + (status.players.max != null ? ' / ' + status.players.max : '')
@@ -307,20 +316,20 @@ async function renderTable(data) {
 
       var actionClusters =
         (canLifecycle ? mcActionClusterHtml('Power', mcLifecycleButtonHtml(ec2State)) : '') +
-        (mcIsAdmin ?
+        (canResize ?
           mcActionClusterHtml('Capacity',
             '<select class="mcResizeSelect">' + mcResizeOptionsHtml(instance['InstanceType']) + '</select>' +
             '<button class="btn primary">Resize</button>') : '') +
-        ((mcIsAdmin || canDownload) ?
+        ((canBackup || canDownload || canContent) ?
           mcActionClusterHtml('Data',
-            (mcIsAdmin ? '<button class="btn mcBackupNowBtn">Backup Now</button>' : '') +
+            (canBackup ? '<button class="btn mcBackupNowBtn">Backup Now</button>' : '') +
             (canDownload ?
               mcDownloadWorldButtonHtml(instanceId, 'full', 'Download (All Data)') +
               mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)') +
               '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '') +
             // Grouped under Data, not Power: these act on the server's content, not its power state.
-            (mcIsAdmin ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
-        (mcIsAdmin ?
+            (canContent ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
+        (canAutoShutdown ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
             '<span class="mcMuted">Auto-shutdown: ' + escapeHtml(idleStatus.text) + '</span>') : '');
@@ -350,8 +359,8 @@ async function renderTable(data) {
         '<div class="mcTabPanel mcKvGrid" data-tab-panel="overview">' + overviewHtml + '</div>' +
         '<div class="mcTabPanel mcActionClusters" data-tab-panel="actions">' + actionClusters + '</div>' +
         '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' +
-          renderModsList(status && status.mods, canManageMods, modsRunning) +
-          (canManageMods ?
+          renderModsList(status && status.mods, canContent, modsRunning) +
+          (canContent ?
             mcInstallModFormHtml(instance['GameName'], modsRunning) +
             '<p class="mcModsNote">Installing or removing a mod here can take a minute or two to show up in the list above. ' +
             'Changes only take effect after a restart:</p>' +
@@ -773,6 +782,15 @@ function sleep(ms) {
 
 function updatelinks() {
   document.getElementById("home").setAttribute("href", mcCloudfrontUrl);
+  var access = document.getElementById("accessLink");
+  if (access) access.setAttribute("href", mcCloudfrontUrl + "/access.html");
+}
+
+//The Lambda rejects both access commands from a non-admin regardless; hiding the link just keeps the nav
+//honest about what's reachable.
+function updateAccessLink() {
+  var access = document.getElementById("accessNav");
+  if (access) access.style.display = mcIsAdmin ? '' : 'none';
 }
 
 async function updateAuthButtons() {
@@ -799,6 +817,7 @@ async function init() {
   await authIfNeeded();
   await updateAuthButtons();
   await loadIsAdmin();
+  updateAccessLink();
 
   refreshData();
   setInterval(refreshData, 5000);

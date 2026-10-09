@@ -10,6 +10,35 @@ import shlex
 import time
 
 
+#What each access template grants. Templates live here rather than in the table: the table holds only
+#which template a user has on a server, so editing one of these changes it for everyone who holds it.
+#"autoshutdown" and "resize" are admin-only - they change what the server costs to run.
+CAPABILITIES_BY_TEMPLATE = {
+    'player': ('view', 'lifecycle', 'download'),
+    'owner': ('view', 'lifecycle', 'download', 'content', 'backup'),
+}
+ADMIN_CAPABILITIES = ('view', 'lifecycle', 'download', 'content', 'backup', 'autoshutdown', 'resize')
+
+#"view" isn't here: it's enforced by leaving a server out of getInfo entirely, so a caller without it
+#can't name the instance in the first place.
+CAPABILITY_BY_COMMAND = {
+    'start': 'lifecycle',
+    'stop': 'lifecycle',
+    'startWorldDownload': 'download',
+    'getWorldDownloadStatus': 'download',
+    'installMod': 'content',
+    'deleteMod': 'content',
+    'restartGame': 'content',
+    'updateGame': 'content',
+    'backupNow': 'backup',
+    'pauseIdleShutdown': 'autoshutdown',
+    'resumeIdleShutdown': 'autoshutdown',
+    'reSize': 'resize',
+}
+
+ADMIN_ONLY_COMMANDS = ('getAccess', 'saveAccess')
+
+
 def lambda_handler(event, context):
     
     tagKey = event['tagName']
@@ -30,11 +59,23 @@ def lambda_handler(event, context):
     ssm = boto3.client('ssm')
     global events
     events = boto3.client('events')
-    info = getInfo(tagKey, tagValue)
-    
+    global ddb
+    ddb = boto3.client('dynamodb')
+    global cognito
+    cognito = boto3.client('cognito-idp')
+    #API Gateway's VTL template renders the multi-valued cognito:groups claim as the string
+    #"[admins, users]" rather than JSON, so strip brackets instead of assuming a clean comma list.
+    groups = [g.strip() for g in (event.get('groups') or '').strip('[]').split(',') if g.strip()]
+    isAdmin = 'admins' in groups
+    command = event['command']
+    callerSub = event.get('sub')
+    accessMap = {} if isAdmin else getAccessForUser(callerSub)
+    info = getInfo(tagKey, tagValue, isAdmin, accessMap)
+
     if len(info['Instances']) < 1:
-        statusmessage = "No gaming server instances found"
-        return(statusmessage)
+        #A tuple like every other return: with access filtering, "nothing to show" is an ordinary state
+        #for a user who hasn't been granted anything yet, not an error, and the front end reads [1].
+        return("No gaming server instances found", info)
 
     if targetInstanceId:
         targetInstances = [i for i in info['Instances'] if i['InstanceId'] == targetInstanceId]
@@ -48,20 +89,16 @@ def lambda_handler(event, context):
         foundInstanceId = i['InstanceId']
         instanceIds.append(foundInstanceId)
 
-    #API Gateway's VTL template renders the multi-valued cognito:groups claim as the string
-    #"[admins, users]" rather than JSON, so strip brackets instead of assuming a clean comma list.
-    groups = [g.strip() for g in (event.get('groups') or '').strip('[]').split(',') if g.strip()]
-    isAdmin = 'admins' in groups
-    command = event['command']
     if not isAdmin:
-        if command in ("start", "stop"):
-            permitted = targetInstanceId and any(i['InstanceId'] == targetInstanceId and i.get('UserLifecycleAllowed') for i in targetInstances)
-            if not permitted:
-                return ("You don't have permission to start/stop this server", info)
-        elif command in ("startWorldDownload", "getWorldDownloadStatus"):
-            permitted = targetInstanceId and any(i['InstanceId'] == targetInstanceId and i.get('UserDownloadsAllowed') for i in targetInstances)
-            if not permitted:
-                return ("You don't have permission to download this server's world", info)
+        if command in ADMIN_ONLY_COMMANDS:
+            return ("You don't have permission to manage access", info)
+        needed = CAPABILITY_BY_COMMAND.get(command)
+        if needed:
+            #Capabilities came from getInfo, which already dropped any server this caller can't view -
+            #so an instanceId that isn't in targetInstances is denied here whatever it was asked to do.
+            allowed = next((i.get('Capabilities') or [] for i in targetInstances if i['InstanceId'] == targetInstanceId), [])
+            if needed not in allowed:
+                return ("You don't have permission to perform this action on this server", info)
         elif command != "getInfo":
             return ("You don't have permission to perform this action", info)
 
@@ -249,18 +286,33 @@ def lambda_handler(event, context):
             print("updateGame failed: "+str(e))
             statusmessage = "Couldn't update the game, please try again later"
         return (statusmessage, info)
+    elif event['command'] == "getAccess":
+        return getAccess(info)
+    elif event['command'] == "saveAccess":
+        body = event.get('body') or {}
+        try:
+            return (saveAccess(body.get('changes') or [], body.get('names') or [], callerSub), info)
+        except Exception as e:
+            print("saveAccess failed: "+str(e))
+            return ("Couldn't save access, please try again later", info)
     else:
         statusmessage = "Error - invalid invocation event received"
     return(statusmessage,info)
 
-def getInfo(tagKey, tagValue):
+def getInfo(tagKey, tagValue, isAdmin=False, accessMap=None):
     info = json.loads('{"Instances":[]}')
     filter =[{'Name': 'tag:'+tagKey, 'Values': [tagValue]}]
     response = ec2.describe_instances(Filters=filter)
     for reservation in response["Reservations"]: #starts for loop for all reservations returned
         for instance in reservation["Instances"]:
             if instance['State'].get('Name') != 'terminated':
+                capabilities = capabilitiesFor(isAdmin, (accessMap or {}).get(instance['InstanceId']))
+                #Resolved before the per-instance lookups below, so a server the caller can't see costs
+                #no S3/Backup/EventBridge calls either.
+                if 'view' not in capabilities:
+                    continue
                 infoDict = {}
+                infoDict['Capabilities'] = capabilities
                 infoDict['InstanceId'] = instance['InstanceId']
                 infoDict['InstanceType'] = instance['InstanceType']
                 infoDict['State'] = instance['State'].get('Name')
@@ -288,11 +340,167 @@ def getInfo(tagKey, tagValue):
                 infoDict['ServerName'] = infoDict['GameStatus'].get('serverName') if infoDict['GameStatus'] else None
                 infoDict['LastBackupTime'] = getLastBackupTime(gameName)
                 infoDict['IdleShutdownStatus'] = getIdleShutdownStatus(gameName, instance.get('Tags', []))
-                #cfn/server-stack.yaml's AllowUserLifecycle/AllowUserDownloads, as tags
-                infoDict['UserLifecycleAllowed'] = next((i.get('Value') == 'true' for i in instance['Tags'] if i.get('Key') == 'user-lifecycle-allowed'), False)
-                infoDict['UserDownloadsAllowed'] = next((i.get('Value') == 'true' for i in instance['Tags'] if i.get('Key') == 'user-downloads-allowed'), False)
                 info["Instances"].append(infoDict)
     return(info)
+
+def capabilitiesFor(isAdmin, role):
+    if isAdmin:
+        return list(ADMIN_CAPABILITIES)
+    return list(CAPABILITIES_BY_TEMPLATE.get(role, ()))
+
+def getAccessForUser(userSub):
+    #One query serves the whole request: every grant this caller holds, keyed by instance.
+    table = os.environ.get('accessTable')
+    if not table or not userSub:
+        return {}
+    try:
+        response = ddb.query(
+            TableName=table,
+            KeyConditionExpression='userSub = :sub',
+            ExpressionAttributeValues={':sub': {'S': userSub}},
+        )
+    except Exception as e:
+        print("Couldn't read access for "+str(userSub)+": "+str(e))
+        return {}
+    return {i['instanceId']['S']: i.get('role', {}).get('S') for i in response.get('Items', [])}
+
+def getAccess(info):
+    #Everything the access page needs in one response. Users come from Cognito, which stays the only
+    #record of who exists; the table holds nothing but grants.
+    servers = [{
+        'InstanceId': i['InstanceId'],
+        'GameName': i.get('GameName'),
+        'ServerName': i.get('ServerName'),
+    } for i in info['Instances']]
+    return {'users': listUsers(), 'servers': servers, 'grants': listGrants()}
+
+def listUsers():
+    userPoolId = os.environ.get('userPoolId')
+    if not userPoolId:
+        return []
+    #One call for the whole admins group, rather than asking per user which groups they're in.
+    adminSubs = set()
+    try:
+        paginator = cognito.get_paginator('list_users_in_group')
+        for page in paginator.paginate(UserPoolId=userPoolId, GroupName='admins'):
+            for u in page.get('Users', []):
+                sub = next((a['Value'] for a in u.get('Attributes', []) if a['Name'] == 'sub'), None)
+                if sub:
+                    adminSubs.add(sub)
+    except Exception as e:
+        print("Couldn't list the admins group: "+str(e))
+    users = []
+    try:
+        paginator = cognito.get_paginator('list_users')
+        for page in paginator.paginate(UserPoolId=userPoolId):
+            for u in page.get('Users', []):
+                attrs = {a['Name']: a['Value'] for a in u.get('Attributes', [])}
+                sub = attrs.get('sub')
+                if not sub:
+                    continue
+                users.append({
+                    #Username is Cognito's own id for the user, which is what renames have to address -
+                    #with a pool keyed on email, it's a generated UUID rather than anything readable.
+                    'username': u['Username'],
+                    'sub': sub,
+                    'email': attrs.get('email'),
+                    'name': attrs.get('name'),
+                    'isAdmin': sub in adminSubs,
+                })
+    except Exception as e:
+        print("Couldn't list users: "+str(e))
+    users.sort(key=lambda u: (not u['isAdmin'], (u.get('name') or u.get('email') or '').lower()))
+    return users
+
+def listGrants():
+    table = os.environ.get('accessTable')
+    if not table:
+        return []
+    grants = []
+    try:
+        paginator = ddb.get_paginator('scan')
+        for page in paginator.paginate(TableName=table):
+            for i in page.get('Items', []):
+                grants.append({
+                    'userSub': i['userSub']['S'],
+                    'instanceId': i['instanceId']['S'],
+                    'role': i.get('role', {}).get('S'),
+                })
+    except Exception as e:
+        print("Couldn't scan access grants: "+str(e))
+    return grants
+
+def saveAccess(changes, names, callerSub):
+    #A role of None means "no access", which is an absent item rather than a stored value - so revoking
+    #is a delete and the table only ever holds real grants.
+    table = os.environ.get('accessTable')
+    if not table:
+        return "Access storage isn't configured"
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    requests = []
+    for c in changes:
+        userSub = c.get('userSub')
+        instanceId = c.get('instanceId')
+        role = c.get('role') or None
+        if not userSub or not instanceId:
+            return "A change was missing its user or server"
+        if role is not None and role not in CAPABILITIES_BY_TEMPLATE:
+            return "Unknown access template: "+str(role)
+        key = {'userSub': {'S': userSub}, 'instanceId': {'S': instanceId}}
+        if role is None:
+            requests.append({'DeleteRequest': {'Key': key}})
+        else:
+            item = dict(key)
+            item['role'] = {'S': role}
+            item['updatedAt'] = {'S': now}
+            if callerSub:
+                item['updatedBy'] = {'S': callerSub}
+            if c.get('email'):
+                item['email'] = {'S': c['email']}
+            requests.append({'PutRequest': {'Item': item}})
+
+    #BatchWriteItem takes 25 at a time, and reports anything it declined rather than failing.
+    for start in range(0, len(requests), 25):
+        batch = requests[start:start+25]
+        response = ddb.batch_write_item(RequestItems={table: batch})
+        unprocessed = response.get('UnprocessedItems') or {}
+        for _ in range(3):
+            if not unprocessed.get(table):
+                break
+            time.sleep(1)
+            response = ddb.batch_write_item(RequestItems=unprocessed)
+            unprocessed = response.get('UnprocessedItems') or {}
+        if unprocessed.get(table):
+            return "Saved some changes, but %d couldn't be written - reload and check" % len(unprocessed[table])
+
+    renamed = saveNames(names)
+    saved = "Saved access for %d server/user pair%s" % (len(changes), "" if len(changes) == 1 else "s")
+    if renamed:
+        saved += ", and renamed %d user%s" % (renamed, "" if renamed == 1 else "s")
+    return saved
+
+def saveNames(names):
+    #Display names are written back to Cognito's own "name" attribute, so there's no second copy here
+    #to drift. It's a standard optional attribute, so this needs no change to the pool's schema.
+    userPoolId = os.environ.get('userPoolId')
+    if not userPoolId or not names:
+        return 0
+    renamed = 0
+    for n in names:
+        username = n.get('username')
+        if not username:
+            continue
+        try:
+            cognito.admin_update_user_attributes(
+                UserPoolId=userPoolId,
+                Username=username,
+                UserAttributes=[{'Name': 'name', 'Value': (n.get('name') or '').strip()}],
+            )
+            renamed += 1
+        except Exception as e:
+            print("Couldn't rename "+str(username)+": "+str(e))
+    return renamed
+
 
 def getGameStatus(gameName, launchTime):
     statusBucket = os.environ.get('statusBucket')
