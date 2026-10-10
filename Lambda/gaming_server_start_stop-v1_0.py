@@ -6,6 +6,8 @@ import boto3
 from datetime import datetime, timezone
 import json
 import os
+import random
+import re
 import shlex
 import time
 
@@ -36,7 +38,22 @@ CAPABILITY_BY_COMMAND = {
     'reSize': 'resize',
 }
 
-ADMIN_ONLY_COMMANDS = ('getAccess', 'saveAccess')
+ADMIN_ONLY_COMMANDS = ('getAccess', 'saveAccess', 'createServer', 'deleteServer', 'getServerOptions')
+
+#These act on the fleet rather than on one server, so they work when there are no servers at all - which
+#is how the first one gets created.
+INSTANCE_FREE_COMMANDS = ('createServer', 'getAccess', 'saveAccess', 'getServerOptions')
+
+#Mirrors the instance types the resize action offers, and the allowlist the Lambda's own IAM policy
+#conditions ec2:RunInstances on.
+#Read by the fleet's idle-shutdown Lambda to skip a server, so both must agree on these.
+IDLE_PAUSE_TAG = 'idle-shutdown'
+IDLE_PAUSE_VALUE = 'paused'
+
+ALLOWED_INSTANCE_TYPES = ('t3a.micro', 't3a.small', 't3a.medium', 't3a.large')
+
+#A server id names its DNS record, its join-password parameter and its status object.
+SERVER_ID_PATTERN = re.compile(r'^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$')
 
 
 def lambda_handler(event, context):
@@ -57,8 +74,8 @@ def lambda_handler(event, context):
     backup = boto3.client('backup')
     global ssm
     ssm = boto3.client('ssm')
-    global events
-    events = boto3.client('events')
+    global accountId
+    accountId = context.invoked_function_arn.split(':')[4]
     global ddb
     ddb = boto3.client('dynamodb')
     global cognito
@@ -72,7 +89,7 @@ def lambda_handler(event, context):
     accessMap = {} if isAdmin else getAccessForUser(callerSub)
     info = getInfo(tagKey, tagValue, isAdmin, accessMap)
 
-    if len(info['Instances']) < 1:
+    if len(info['Instances']) < 1 and command not in INSTANCE_FREE_COMMANDS:
         #A tuple like every other return: with access filtering, "nothing to show" is an ordinary state
         #for a user who hasn't been granted anything yet, not an error, and the front end reads [1].
         return("No gaming server instances found", info)
@@ -91,7 +108,7 @@ def lambda_handler(event, context):
 
     if not isAdmin:
         if command in ADMIN_ONLY_COMMANDS:
-            return ("You don't have permission to manage access", info)
+            return ("You don't have permission to manage servers or access", info)
         needed = CAPABILITY_BY_COMMAND.get(command)
         if needed:
             #Capabilities came from getInfo, which already dropped any server this caller can't view -
@@ -157,7 +174,6 @@ def lambda_handler(event, context):
             except:
                     statusmessage = "Something went wrong with resizing your server, please try again later"
     elif event['command'] == "backupNow":
-        accountId = context.invoked_function_arn.split(':')[4]
         started = []
         failed = []
         for i in targetInstances:
@@ -166,8 +182,8 @@ def lambda_handler(event, context):
                 failed.append(i['InstanceId'])
                 continue
             try:
-                startBackupNow(gameName, accountId)
-                started.append(gameName)
+                startBackupNow(i)
+                started.append(i.get('ServerId') or gameName)
             except Exception as e:
                 print("backupNow failed for "+str(gameName)+": "+str(e))
                 failed.append(gameName)
@@ -181,18 +197,16 @@ def lambda_handler(event, context):
         pausing = event['command'] == "pauseIdleShutdown"
         done = []
         for i in targetInstances:
-            gameName = i.get('GameName')
-            if not gameName:
-                continue
+            label = i.get('ServerId') or i.get('GameName')
             try:
-                ruleName = 'game-server-'+gameName+'-cfn-idle-check'
                 if pausing:
-                    events.disable_rule(Name=ruleName)
+                    ec2.create_tags(Resources=[i['InstanceId']],
+                                    Tags=[{'Key': IDLE_PAUSE_TAG, 'Value': IDLE_PAUSE_VALUE}])
                 else:
-                    events.enable_rule(Name=ruleName)
-                done.append(gameName)
+                    ec2.delete_tags(Resources=[i['InstanceId']], Tags=[{'Key': IDLE_PAUSE_TAG}])
+                done.append(label)
             except Exception as e:
-                print(event['command']+" failed for "+str(gameName)+": "+str(e))
+                print(event['command']+" failed for "+str(label)+": "+str(e))
         verb = "paused" if pausing else "resumed"
         statusmessage = "Auto-shutdown "+verb+" for " + ", ".join(done) if done else "Couldn't "+("pause" if pausing else "resume")+" auto-shutdown, please try again later"
     elif event['command'] == "startWorldDownload":
@@ -286,6 +300,22 @@ def lambda_handler(event, context):
             print("updateGame failed: "+str(e))
             statusmessage = "Couldn't update the game, please try again later"
         return (statusmessage, info)
+    elif event['command'] == "createServer":
+        try:
+            return (createServer(event), info)
+        except Exception as e:
+            print("createServer failed: "+str(e))
+            return ("Couldn't create the server: "+str(e)[:300], info)
+    elif event['command'] == "deleteServer":
+        if not targetInstances:
+            return ("No matching instance found", info)
+        try:
+            return (deleteServer(targetInstances[0]), info)
+        except Exception as e:
+            print("deleteServer failed: "+str(e))
+            return ("Couldn't delete the server: "+str(e)[:300], info)
+    elif event['command'] == "getServerOptions":
+        return getServerOptions()
     elif event['command'] == "getAccess":
         return getAccess(info)
     elif event['command'] == "saveAccess":
@@ -330,16 +360,27 @@ def getInfo(tagKey, tagValue, isAdmin=False, accessMap=None):
                         infoDict["hostedZoneId"] = 'No hosted zone tag found'
                 infoDict['PublicIpAddress'] = instance.get('PublicIpAddress','No public IP address')
                 gameName = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'game-name'), None)
+                serverId = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'server-id'), None)
                 #Read from the instance's tags, never trusted from the client
                 infoDict['GameName'] = gameName
+                infoDict['ServerId'] = serverId
+                #A server names its own status object. One without a server-id tag is keyed on its game.
+                statusKey = serverId or gameName
                 infoDict['DataPath'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'data-path'), None)
                 infoDict['WorldDownloadPaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-paths'), None)
                 infoDict['WorldDownloadCorePaths'] = next((i.get('Value') for i in instance['Tags'] if i.get('Key') == 'world-download-core-paths'), None)
-                infoDict['GameStatus'] = getGameStatus(gameName, instance.get('LaunchTime')) if infoDict['State'] == 'running' else None
+                infoDict['GameStatus'] = getGameStatus(statusKey, instance.get('LaunchTime')) if infoDict['State'] == 'running' else None
+                #Only looked up when the game isn't reporting: a server that answers has plainly finished
+                #installing, and getInfo is polled every few seconds.
+                infoDict['InstallStatus'] = None if infoDict['GameStatus'] else getInstallStatus(statusKey)
                 #Promoted out of GameStatus: the front end's Server Name column reads it top-level.
                 infoDict['ServerName'] = infoDict['GameStatus'].get('serverName') if infoDict['GameStatus'] else None
-                infoDict['LastBackupTime'] = getLastBackupTime(gameName)
-                infoDict['IdleShutdownStatus'] = getIdleShutdownStatus(gameName, instance.get('Tags', []))
+                dataVolumeId = next((m.get('Ebs', {}).get('VolumeId')
+                                     for m in instance.get('BlockDeviceMappings', [])
+                                     if m.get('DeviceName') == '/dev/sdf'), None)
+                infoDict['DataVolumeId'] = dataVolumeId
+                infoDict['LastBackupTime'] = getLastBackupTime(gameName, serverId, dataVolumeId)
+                infoDict['IdleShutdownStatus'] = getIdleShutdownStatus(instance.get('Tags', []))
                 info["Instances"].append(infoDict)
     return(info)
 
@@ -364,11 +405,342 @@ def getAccessForUser(userSub):
         return {}
     return {i['instanceId']['S']: i.get('role', {}).get('S') for i in response.get('Items', [])}
 
+#Written to the root disk, not /tmp, which this AMI mounts as tmpfs and clears on every reboot - the
+#status agent re-reads these on every restart.
+USER_DATA = """#!/bin/bash
+set -x
+REPORT_URL={reportUrl}
+LOG_URL={logUrl}
+report() {{
+  code=$?
+  state=ok
+  [ "$code" = "0" ] || state=failed
+  printf '{{"status":"%s","exitCode":%d,"finishedAt":"%s"}}' "$state" "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    > /tmp/install-result.json
+  wget -q --method=PUT --body-file=/tmp/install-result.json \
+    --header='Content-Type: application/json' -O /dev/null "$REPORT_URL" || true
+  #Uploaded so a failed install can be read without reaching the instance at all. The journal is
+  #included because a unit started here reports its own failure there, not on this script's output.
+  tail -c 120000 /var/log/cloud-init-output.log > /tmp/install.log 2>/dev/null || true
+  echo '===== journal =====' >> /tmp/install.log
+  journalctl -b --no-pager 2>/dev/null | tail -c 120000 >> /tmp/install.log || true
+  wget -q --method=PUT --body-file=/tmp/install.log \
+    --header='Content-Type: text/plain' -O /dev/null "$LOG_URL" || true
+}}
+trap report EXIT
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt update || (sleep 5 && apt update) || (sleep 15 && apt update)
+apt upgrade -y || echo "apt upgrade failed - continuing, not required for the game server itself"
+mkdir -p /etc/game-server-manager
+echo {serverId} > /etc/game-server-manager/paramName.txt
+echo {statusBucket} > /etc/game-server-manager/statusBucket.txt
+echo {serverId} > /etc/game-server-manager/statusKey.txt
+echo {companionSha256} > /etc/game-server-manager/companionSha256.txt
+echo {gameVersion} > /etc/game-server-manager/gameVersion.txt
+mkdir -p /usr/games/install
+cd /usr/games/install
+wget -O gameserverinstall.sh {installScriptUrl}
+echo "{installSha256}  gameserverinstall.sh" | sha256sum -c -
+chmod +x gameserverinstall.sh
+./gameserverinstall.sh {installScriptUrl}
+"""
+
+
+def serverTags(serverId, game):
+    return [
+        {'Key': 'Name', 'Value': 'game-server-' + serverId},
+        {'Key': 'server-id', 'Value': serverId},
+        {'Key': 'game-name', 'Value': game},
+        {'Key': os.environ['idTagName'], 'Value': os.environ['idTagValue']},
+        {'Key': os.environ['managedTag'], 'Value': os.environ['managedValue']},
+        {'Key': 'data-path', 'Value': ''},
+    ]
+
+
+def listManagedServers():
+    response = ec2.describe_instances(Filters=[
+        {'Name': 'tag:' + os.environ['managedTag'], 'Values': [os.environ['managedValue']]},
+        {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']},
+    ])
+    servers = []
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            tags = {t['Key']: t['Value'] for t in instance.get('Tags', [])}
+            servers.append({'InstanceId': instance['InstanceId'], 'ServerId': tags.get('server-id')})
+    return servers
+
+
+def readJoinPassword(serverId):
+    try:
+        return ssm.get_parameter(Name='game-password-' + serverId, WithDecryption=True)['Parameter']['Value']
+    except Exception:
+        return None
+
+
+def ensureJoinPassword(serverId, inheritFrom=None):
+    #The installer reads this parameter, so it has to hold the right value before the instance boots.
+    if readJoinPassword(serverId):
+        return False
+
+    inherited = readJoinPassword(inheritFrom) if inheritFrom else None
+    #A restored volume carries the archived server's config, which holds that server's password. Copying
+    #it keeps the parameter and the running game in agreement, and the players' password unchanged.
+    password = inherited or '%030x' % random.randrange(16**30)
+    ssm.put_parameter(Name='game-password-' + serverId, Value=password, Type='SecureString', Overwrite=True)
+    return inherited is not None
+
+
+def getServerOptions():
+    templates = json.loads(os.environ.get('templates') or '{}')
+    options = []
+    for game in sorted(templates):
+        t = templates[game]
+        options.append({
+            'game': game,
+            'displayName': t['displayName'],
+            'requiresGameVersion': t['requiresGameVersion'],
+            'defaultInstanceType': t['defaultInstanceType'],
+            'defaultVolumeSizeGib': t['defaultVolumeSizeGib'],
+        })
+
+    snapshots = []
+    try:
+        response = ec2.describe_snapshots(OwnerIds=['self'], Filters=[
+            {'Name': 'tag:' + os.environ['managedTag'], 'Values': [os.environ['managedValue']]},
+        ])
+        for snap in sorted(response['Snapshots'], key=lambda x: x['StartTime'], reverse=True):
+            tags = {t['Key']: t['Value'] for t in snap.get('Tags', [])}
+            snapshots.append({
+                'snapshotId': snap['SnapshotId'],
+                'serverId': tags.get('server-id'),
+                'game': tags.get('game-name'),
+                'sizeGib': snap['VolumeSize'],
+                'state': snap['State'],
+                'startTime': snap['StartTime'].strftime('%Y-%m-%dT%H:%M:%SZ'),
+            })
+    except Exception as e:
+        print("Couldn't list archives: " + str(e))
+
+    return {'templates': options, 'snapshots': snapshots,
+            'instanceTypes': list(ALLOWED_INSTANCE_TYPES), 'maxServers': int(os.environ.get('maxServers') or '10')}
+
+
+def createServer(event):
+    templates = json.loads(os.environ.get('templates') or '{}')
+    game = (event.get('game') or '').strip()
+    serverId = (event.get('serverId') or '').strip().lower()
+
+    template = templates.get(game)
+    if not template:
+        return "Unknown game \"" + game + "\" - pick one of: " + ", ".join(sorted(templates))
+    if not SERVER_ID_PATTERN.match(serverId):
+        return "A server id must be 3-32 characters of lowercase letters, numbers and hyphens"
+
+    existing = listManagedServers()
+    #The IAM policy conditions RunInstances on the managed tag and the instance-type allowlist too.
+    maxServers = int(os.environ.get('maxServers') or '10')
+    if len(existing) >= maxServers:
+        return "There are already %d servers, which is the limit" % maxServers
+    if any(s['ServerId'] == serverId for s in existing):
+        return "A server called \"" + serverId + "\" already exists"
+
+    instanceType = (event.get('instanceType') or '').strip() or template['defaultInstanceType']
+    if instanceType not in ALLOWED_INSTANCE_TYPES:
+        return "Instance type must be one of: " + ", ".join(ALLOWED_INSTANCE_TYPES)
+
+    gameVersion = (event.get('gameVersion') or '').strip()
+    if template['requiresGameVersion'] and not gameVersion:
+        return template['displayName'] + " needs an exact game version"
+
+    try:
+        volumeSize = int(event.get('volumeSize') or template['defaultVolumeSizeGib'])
+    except ValueError:
+        return "Volume size must be a whole number of GiB"
+    if volumeSize < 8:
+        return "Volume size must be at least 8 GiB"
+
+    snapshotId = (event.get('snapshotId') or '').strip()
+
+    ami = ssm.get_parameter(Name=os.environ['amiParameter'])['Parameter']['Value']
+
+    #Created as part of the launch and kept when the instance goes, which is what keeps a world across
+    #a rebuild.
+    dataVolume = {'VolumeType': 'gp3', 'DeleteOnTermination': False}
+    if snapshotId:
+        dataVolume['SnapshotId'] = snapshotId
+    else:
+        dataVolume['VolumeSize'] = volumeSize
+
+    #Replaced up front, so a marker left by a previous server of this id can't be read as this one's
+    #outcome while it is still installing.
+    try:
+        s3.put_object(
+            Bucket=os.environ['statusBucket'],
+            Key='status/' + serverId + '.install.json',
+            Body=json.dumps({'status': 'installing'}).encode(),
+            ContentType='application/json',
+        )
+    except Exception as e:
+        print("Couldn't mark " + serverId + " as installing: " + str(e))
+
+    reportUrl = s3.generate_presigned_url('put_object', Params={
+        'Bucket': os.environ['statusBucket'],
+        'Key': 'status/' + serverId + '.install.json',
+        'ContentType': 'application/json',
+    }, ExpiresIn=7200)
+    logUrl = s3.generate_presigned_url('put_object', Params={
+        'Bucket': os.environ['statusBucket'],
+        'Key': 'status/' + serverId + '.install.log',
+        'ContentType': 'text/plain',
+    }, ExpiresIn=7200)
+
+    userData = USER_DATA.format(
+        reportUrl=shlex.quote(reportUrl),
+        logUrl=shlex.quote(logUrl),
+        serverId=shlex.quote(serverId),
+        statusBucket=shlex.quote(os.environ['statusBucket']),
+        companionSha256=shlex.quote(template.get('companionSha256') or ''),
+        gameVersion=shlex.quote(gameVersion),
+        installScriptUrl=shlex.quote(template['installScriptUrl']),
+        installSha256=template['installSha256'],
+    )
+
+    tags = [t for t in serverTags(serverId, game) if t['Value'] != '']
+    tags.append({'Key': 'data-path', 'Value': template['dataPath']})
+    tags.append({'Key': 'world-download-paths', 'Value': template['worldDownloadPaths']})
+    tags.append({'Key': 'world-download-core-paths', 'Value': template['worldDownloadCorePaths']})
+    if os.environ.get('hostedZoneName'):
+        tags.append({'Key': 'domain', 'Value': serverId + '.' + os.environ['hostedZoneName']})
+        tags.append({'Key': 'hostedZoneId', 'Value': os.environ['hostedZoneId']})
+
+    inheritedPassword = ensureJoinPassword(serverId, inheritFrom=snapshotServerId(snapshotId))
+
+    response = ec2.run_instances(
+        ImageId=ami,
+        InstanceType=instanceType,
+        MinCount=1,
+        MaxCount=1,
+        SubnetId=os.environ['subnetId'],
+        SecurityGroupIds=[template['securityGroupId']],
+        IamInstanceProfile={'Arn': os.environ['instanceProfileArn']},
+        UserData=userData,
+        BlockDeviceMappings=[{'DeviceName': '/dev/sdf', 'Ebs': dataVolume}],
+        #Only the instance is tagged here: tagging volumes at launch would tag the root disk too, and the
+        #backup plan selects on this tag.
+        TagSpecifications=[{'ResourceType': 'instance', 'Tags': tags}],
+    )
+    instanceId = response['Instances'][0]['InstanceId']
+    taggedVolume = None
+    try:
+        taggedVolume = tagDataVolume(instanceId, tags)
+    except Exception as e:
+        print("Couldn't tag the data volume of " + instanceId + ": " + str(e))
+
+    #A new instance has no public IP for a moment, so the DNS record is left to the state machine that
+    #already retries for one.
+    domain = next((t['Value'] for t in tags if t['Key'] == 'domain'), None)
+    if domain:
+        try:
+            updateDnsStateFunc({'Instances': [{
+                'hostedZoneId': os.environ['hostedZoneId'],
+                'DomainName': domain,
+                'InstanceId': instanceId,
+            }]})
+        except Exception as e:
+            print("Couldn't start the DNS update for " + instanceId + ": " + str(e))
+
+    print("createServer: serverId=" + serverId + " game=" + game + " instanceId=" + instanceId)
+    created = ("Created " + serverId + " (" + instanceId + ") - it installs " +
+               template['displayName'] + " on first boot, which takes a few minutes")
+    if not taggedVolume:
+        created += ". Its data volume couldn't be tagged, so backups won't cover it yet"
+    if snapshotId and not inheritedPassword:
+        created += (". Its join password couldn't be taken from the archive, so players keep the one the "
+                    "restored world already had rather than the one stored for " + serverId)
+    return created
+
+
+def tagDataVolume(instanceId, tags):
+    #The volume id exists as soon as the instance does, so this needs no wait - but the mapping can take
+    #a moment to appear in describe_instances.
+    for _ in range(10):
+        response = ec2.describe_instances(InstanceIds=[instanceId])
+        for mapping in response['Reservations'][0]['Instances'][0].get('BlockDeviceMappings', []):
+            if mapping.get('DeviceName') != '/dev/sdf':
+                continue
+            volumeId = (mapping.get('Ebs') or {}).get('VolumeId')
+            if volumeId:
+                ec2.create_tags(Resources=[volumeId], Tags=tags)
+                return volumeId
+        time.sleep(1)
+    #The server still works; it is the backup plan that selects on these tags.
+    print("Couldn't tag the data volume of " + instanceId)
+    return None
+
+
+def dataVolumeOf(instanceId):
+    response = ec2.describe_instances(InstanceIds=[instanceId])
+    for mapping in response['Reservations'][0]['Instances'][0].get('BlockDeviceMappings', []):
+        if mapping.get('DeviceName') == '/dev/sdf':
+            return (mapping.get('Ebs') or {}).get('VolumeId')
+    return None
+
+
+def snapshotServerId(snapshotId):
+    if not snapshotId:
+        return None
+    try:
+        snapshots = ec2.describe_snapshots(SnapshotIds=[snapshotId])['Snapshots']
+    except Exception as e:
+        print("Couldn't read archive " + str(snapshotId) + ": " + str(e))
+        return None
+    for snap in snapshots:
+        for tag in snap.get('Tags', []):
+            if tag.get('Key') == 'server-id':
+                return tag.get('Value')
+    return None
+
+
+def deleteServer(instance):
+    instanceId = instance['InstanceId']
+    serverId = instance.get('ServerId') or instance.get('GameName') or instanceId
+    gameName = instance.get('GameName')
+
+    #Snapshotted before the instance goes, so a decommissioned server can be restored from this
+    #snapshot later.
+    volumeId = dataVolumeOf(instanceId)
+    snapshotId = None
+    if volumeId:
+        snapshot = ec2.create_snapshot(
+            VolumeId=volumeId,
+            Description='Archive of game server ' + str(serverId),
+            TagSpecifications=[{'ResourceType': 'snapshot', 'Tags': [
+                {'Key': 'Name', 'Value': 'game-server-' + str(serverId) + '-archive'},
+                {'Key': 'server-id', 'Value': str(serverId)},
+                {'Key': 'game-name', 'Value': str(gameName)},
+                {'Key': os.environ['managedTag'], 'Value': os.environ['managedValue']},
+            ]}],
+        )
+        snapshotId = snapshot['SnapshotId']
+
+    ec2.terminate_instances(InstanceIds=[instanceId])
+    print("deleteServer: instanceId=" + instanceId + " volumeId=" + str(volumeId) +
+          " snapshotId=" + str(snapshotId))
+
+    if snapshotId:
+        return ("Terminated " + str(serverId) + ". Archived to " + snapshotId +
+                " - create a server from it to bring this world back. Its volume " + str(volumeId) +
+                " is also kept.")
+    return "Terminated " + str(serverId) + " - no data volume was found to archive"
+
+
 def getAccess(info):
     #Everything the access page needs in one response. Users come from Cognito, which stays the only
     #record of who exists; the table holds nothing but grants.
     servers = [{
         'InstanceId': i['InstanceId'],
+        'ServerId': i.get('ServerId'),
         'GameName': i.get('GameName'),
         'ServerName': i.get('ServerName'),
     } for i in info['Instances']]
@@ -521,46 +893,77 @@ def getGameStatus(gameName, launchTime):
         pass
     return status
 
-def getLastBackupTime(gameName):
-    #cfn/server-stack.yaml names vaults by a fixed convention, so this needs no lookup.
-    if not gameName:
+def getInstallStatus(statusKey):
+    #Written by the installer through a presigned URL, so a server that failed to install says so
+    #instead of looking like one that is still starting.
+    statusBucket = os.environ.get('statusBucket')
+    if not statusBucket or not statusKey:
         return None
-    vaultName = 'game-server-' + gameName + '-cfn-backup-vault-daily'
     try:
-        points = backup.list_recovery_points_by_backup_vault(BackupVaultName=vaultName)['RecoveryPoints']
+        obj = s3.get_object(Bucket=statusBucket, Key='status/' + statusKey + '.install.json')
+        return json.loads(obj['Body'].read()).get('status')
+    except Exception:
+        return None
+
+
+def getLastBackupTime(gameName, serverId, volumeId):
+    #Every server shares one vault, so a recovery point is identified by the volume it was taken from -
+    #asking by vault alone would report any server's backup as this one's.
+    #
+    #A server predating the server-id tag has its own per-game vault, named by convention.
+    if serverId:
+        vaultName = os.environ.get('backupVaultName')
+        if not vaultName or not volumeId:
+            return None
+        arguments = {
+            'BackupVaultName': vaultName,
+            'ByResourceArn': 'arn:aws:ec2:%s:%s:volume/%s' % (os.environ.get('AWS_REGION'), accountId, volumeId),
+        }
+    elif gameName:
+        arguments = {'BackupVaultName': 'game-server-' + gameName + '-cfn-backup-vault-daily'}
+    else:
+        return None
+    try:
+        points = backup.list_recovery_points_by_backup_vault(**arguments)['RecoveryPoints']
         completed = [p['CreationDate'] for p in points if p.get('Status') == 'COMPLETED']
         return max(completed).strftime('%Y-%m-%dT%H:%M:%SZ') if completed else None
     except Exception as e:
-        print("No backup info available for "+str(gameName)+": "+str(e))
+        print("No backup info available for "+str(serverId or gameName)+": "+str(e))
         return None
 
-def getIdleShutdownStatus(gameName, tags):
-    #"triggered-once" means one empty check is already recorded, so the next one stops the instance.
-    if not gameName:
-        return None
-    try:
-        ruleState = events.describe_rule(Name='game-server-'+gameName+'-cfn-idle-check')['State']
-    except Exception as e:
-        print("No idle-shutdown rule info available for "+str(gameName)+": "+str(e))
-        return None
-    if ruleState != 'ENABLED':
+def getIdleShutdownStatus(tags):
+    #One schedule covers every server, so a server is exempted by tag. "triggered-once" means one empty
+    #check is already recorded, so the next one stops it.
+    byKey = {t.get('Key'): t.get('Value') for t in tags}
+    if byKey.get(IDLE_PAUSE_TAG) == IDLE_PAUSE_VALUE:
         return 'disabled'
-    wasIdle = any(t.get('Key') == 'idle-check' and t.get('Value') == 'true' for t in tags)
-    return 'triggered-once' if wasIdle else 'enabled'
+    return 'triggered-once' if byKey.get('idle-check') == 'true' else 'enabled'
 
-def startBackupNow(gameName, accountId):
-    #The role name has to be derived from a convention rather than looked up: the Resource Groups
-    #Tagging API doesn't index IAM roles at all.
+def startBackupNow(instance):
     region = os.environ.get('AWS_REGION')
-    volumes = ec2.describe_volumes(Filters=[{'Name': 'tag:game-name', 'Values': [gameName]}])['Volumes']
-    if not volumes:
-        raise Exception("No data volume found for "+gameName)
-    volumeArn = 'arn:aws:ec2:'+region+':'+accountId+':volume/'+volumes[0]['VolumeId']
-    vaultName = 'game-server-'+gameName+'-cfn-backup-vault-daily'
-    roleArn = 'arn:aws:iam::'+accountId+':role/service-role/game-server-'+gameName+'-cfn-backup-role'
+    serverId = instance.get('ServerId')
+    gameName = instance.get('GameName')
+
+    if serverId:
+        volumeId = instance.get('DataVolumeId')
+        if not volumeId:
+            raise Exception("No data volume found for " + serverId)
+        vaultName = os.environ['backupVaultName']
+        roleArn = os.environ['backupRoleArn']
+    else:
+        #A server predating the server-id tag has one volume per game, and its own vault and role, both
+        #named by the convention its stack used.
+        volumes = ec2.describe_volumes(Filters=[{'Name': 'tag:game-name', 'Values': [gameName]}])['Volumes']
+        if not volumes:
+            raise Exception("No data volume found for " + str(gameName))
+        volumeId = volumes[0]['VolumeId']
+        vaultName = 'game-server-' + gameName + '-cfn-backup-vault-daily'
+        roleArn = ('arn:aws:iam::' + accountId +
+                   ':role/service-role/game-server-' + gameName + '-cfn-backup-role')
+
     backup.start_backup_job(
         BackupVaultName=vaultName,
-        ResourceArn=volumeArn,
+        ResourceArn='arn:aws:ec2:' + region + ':' + accountId + ':volume/' + volumeId,
         IamRoleArn=roleArn,
     )
 

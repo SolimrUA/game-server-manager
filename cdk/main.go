@@ -16,14 +16,25 @@ func main() {
 	must(prepareLambdaAssets(&config))
 
 	app := awscdk.NewApp(nil)
+	env := &awscdk.Environment{
+		Account: jsii.String(config.AwsAccount),
+		Region:  jsii.String(config.AwsRegion),
+	}
+	fleet := NewFleetStack(app, config.FleetStackName, &FleetStackProps{
+		StackProps: awscdk.StackProps{Env: env},
+		Config:     config,
+	})
+
+	publisherOutputs, err := lookupStackOutputs(config.PublisherStackName, config.AwsRegion)
+	must(err)
+	templates, err := resolveTemplates(publisherOutputs, fleet.SecurityGroupIds)
+	must(err)
+
 	NewControlPanelStack(app, config.ControlPanelStackName, &ControlPanelStackProps{
-		StackProps: awscdk.StackProps{
-			Env: &awscdk.Environment{
-				Account: jsii.String(config.AwsAccount),
-				Region:  jsii.String(config.AwsRegion),
-			},
-		},
-		Config: config,
+		StackProps: awscdk.StackProps{Env: env},
+		Config:     config,
+		Fleet:      fleet,
+		Templates:  templates,
 	})
 	app.Synth(nil)
 }
@@ -38,6 +49,7 @@ func prepareLambdaAssets(config *Config) error {
 	}{
 		{"../Lambda/gaming_server_start_stop-v1_0.py", &config.ControlLambdaAssetDir},
 		{"../Lambda/update-dns-v1_0.py", &config.UpdateDnsAssetDir},
+		{"../Lambda/idle_shutdown.py", &config.IdleShutdownAssetDir},
 	} {
 		if err := os.MkdirAll(*asset.target, 0o755); err != nil {
 			return err

@@ -24,6 +24,9 @@ import (
 type ControlPanelStackProps struct {
 	awscdk.StackProps
 	Config Config
+	Fleet  Fleet
+	// Templates is the resolved game templates, as JSON, which the control Lambda creates servers from.
+	Templates string
 }
 
 // NewControlPanelStack builds the control panel: the web site, the API behind it, and the Lambda that
@@ -32,6 +35,7 @@ type ControlPanelStackProps struct {
 func NewControlPanelStack(scope constructs.Construct, id string, props *ControlPanelStackProps) awscdk.Stack {
 	stack := awscdk.NewStack(scope, &id, &props.StackProps)
 	config := props.Config
+	fleet := props.Fleet
 
 	// The pool, its hosted-UI domain and its groups hold the accounts and are referenced by id. A pool
 	// allows only one domain and one group of a given name; app clients it takes any number of.
@@ -130,27 +134,44 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 			"statusBucket":    statusBucketName,
 			"accessTable":     accessTable.TableName(),
 			"userPoolId":      userPool.UserPoolId(),
+
+			"templates":          jsii.String(props.Templates),
+			"instanceProfileArn": fleet.InstanceProfileArn,
+			"subnetId":           awscdk.Fn_ImportValue(jsii.String("common-infra-subnet-id")),
+			"availabilityZone":   awscdk.Fn_ImportValue(jsii.String("common-infra-subnet-az")),
+			"amiParameter":       jsii.String(config.AmiParameter),
+			"managedTag":         jsii.String(config.ManagedTag),
+			"managedValue":       jsii.String(config.ManagedValue),
+			"idTagName":          jsii.String(config.IdTagName),
+			"idTagValue":         jsii.String(config.IdTagValue),
+			"hostedZoneId":       jsii.String(config.HostedZoneId),
+			"hostedZoneName":     jsii.String(config.HostedZoneName),
+			"maxServers":         jsii.String(fmt.Sprintf("%d", config.MaxServers)),
+			"backupVaultName":    fleet.BackupVaultName,
+			"backupRoleArn":      fleet.BackupRoleArn,
 		},
 	})
 
 	accessTable.GrantReadWriteData(controlLambda)
 	dnsStateMachine.GrantStartExecution(controlLambda)
 	addControlLambdaPermissions(stack, controlLambda, userPool, statusBucketName, config)
+	addServerCreationPermissions(stack, controlLambda, fleet, config, statusBucketName)
 
 	// --- the API ------------------------------------------------------------
 	api := addApi(stack, controlLambda, userPool, config)
 
 	// Everything the published config.js needs, and the values a Server stack is deployed with.
 	outputs := map[string]*string{
-		"ControlApiUrl":     api.Url(),
-		"CognitoUserPoolId": userPool.UserPoolId(),
-		"CognitoClientID":   userPoolClient.UserPoolClientId(),
-		"CognitoDomainName": jsii.String(fmt.Sprintf("%s.auth.%s.amazoncognito.com", config.CognitoDomainPrefix, config.AwsRegion)),
-		"ControlPanelUrl":   controlPanelUrl,
-		"CloudfrontUrl":     jsii.String(fmt.Sprintf("https://%s", *distribution.DistributionDomainName())),
-		"S3Bucket":          controlPanelBucket.BucketArn(),
-		"TagName":           jsii.String(config.IdTagName),
-		"TagValue":          jsii.String(config.IdTagValue),
+		"ControlApiUrl":            api.Url(),
+		"CognitoUserPoolId":        userPool.UserPoolId(),
+		"CognitoClientID":          userPoolClient.UserPoolClientId(),
+		"CognitoDomainName":        jsii.String(fmt.Sprintf("%s.auth.%s.amazoncognito.com", config.CognitoDomainPrefix, config.AwsRegion)),
+		"ControlPanelUrl":          controlPanelUrl,
+		"CloudfrontUrl":            jsii.String(fmt.Sprintf("https://%s", *distribution.DistributionDomainName())),
+		"CloudFrontDistributionId": distribution.DistributionId(),
+		"S3Bucket":                 controlPanelBucket.BucketArn(),
+		"TagName":                  jsii.String(config.IdTagName),
+		"TagValue":                 jsii.String(config.IdTagValue),
 	}
 	for name, value := range outputs {
 		awscdk.NewCfnOutput(stack, jsii.String(name), &awscdk.CfnOutputProps{Value: value})

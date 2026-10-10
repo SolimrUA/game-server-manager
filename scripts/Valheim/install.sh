@@ -36,11 +36,28 @@ sudo usermod -aG docker $USER
 sudo mkdir -p /usr/games/serverconfig
 
 #The data volume is attached only after this script signals success, so a broken install fails fast
-#without touching game data. systemd's udev integration starts the service below when the device
-#appears, named by its by-id path since NVMe names like /dev/nvme1n1 aren't predictable on Nitro.
-DATA_VOLUME_ID=$(</etc/game-server-manager/dataVolumeId.txt)
-VOLUME_ID_NO_DASH="${DATA_VOLUME_ID//-/}"
-DEVICE_PATH="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${VOLUME_ID_NO_DASH}"
+#without touching game data. The device is addressed by its by-id path because NVMe names like
+#/dev/nvme1n1 aren't predictable on Nitro.
+#
+#Found rather than named: the volume is created as part of launching the instance, so nothing knows its
+#id in time to pass it in. There is exactly one EBS device that isn't the root disk, and that is it.
+ROOT_DEVICE=$(findmnt -n -o SOURCE / | sed 's/p\?[0-9]*$//')
+DEVICE_PATH=""
+for _ in $(seq 1 30); do
+  for link in /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_*; do
+    [ -e "$link" ] || continue
+    case "$link" in *-part*) continue ;; esac
+    [ "$(readlink -f "$link")" = "$ROOT_DEVICE" ] && continue
+    DEVICE_PATH="$link"
+    break
+  done
+  [ -n "$DEVICE_PATH" ] && break
+  sleep 2
+done
+if [ -z "$DEVICE_PATH" ]; then
+  echo "No data volume found attached to this instance" >&2
+  exit 1
+fi
 DEVICE_UNIT=$(systemd-escape --path --suffix=device "$DEVICE_PATH")
 
 sudo bash -c 'cat > /usr/local/bin/valheim-prepare-data.sh' <<'PREPARE_SCRIPT'
@@ -203,3 +220,9 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable valheim-status-agent
+
+#Started as well as enabled: the volume is attached as the instance launches, so its device
+#was already active before this unit existed, and nothing pulls the unit in until the next
+#boot. Last, because mounting ends by starting the units written above. Blocking, so a
+#failure to mount fails the install.
+sudo systemctl start valheim-data.service

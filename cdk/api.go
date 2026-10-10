@@ -39,6 +39,10 @@ var Endpoints = []Endpoint{
 	{Path: "deletemod", Command: "deleteMod", Params: []string{"instanceid", "modname"}},
 	{Path: "downloadworldstart", Command: "startWorldDownload", Params: []string{"instanceid", "scope"}},
 	{Path: "downloadworldstatus", Command: "getWorldDownloadStatus", Params: []string{"instanceid", "commandid", "s3key"}},
+	{Path: "serveroptions", Command: "getServerOptions"},
+	{Path: "createserver", Command: "createServer",
+		Params: []string{"game", "serverid", "instancetype", "gameversion", "volumesize", "snapshotid"}},
+	{Path: "deleteserver", Command: "deleteServer", Params: []string{"instanceid"}},
 	{Path: "access", Command: "getAccess"},
 	{Path: "saveaccess", Command: "saveAccess", Post: true},
 }
@@ -52,6 +56,13 @@ var paramNames = map[string]string{
 	"scope":      "scope",
 	"commandid":  "commandId",
 	"s3key":      "s3Key",
+
+	"game":         "game",
+	"serverid":     "serverId",
+	"instancetype": "instanceType",
+	"gameversion":  "gameVersion",
+	"volumesize":   "volumeSize",
+	"snapshotid":   "snapshotId",
 }
 
 // RequestTemplate builds the mapping template that turns a request into the Lambda's event. The groups

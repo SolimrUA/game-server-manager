@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,9 @@ const localConfigFile = ".env"
 //
 // Optional.
 // CONTROL_PANEL_STACK_NAME=game-server-controlpanel-cdk
+// FLEET_STACK_NAME=game-server-fleet-cfn
+// PUBLISHER_STACK_NAME=GameServerAssetPublisher
+// MAX_SERVERS=10
 // ID_TAG_NAME=game-server-finder
 // ID_TAG_VALUE=game-server
 
@@ -37,6 +41,18 @@ type Config struct {
 	AwsRegion  string
 
 	ControlPanelStackName string
+	FleetStackName        string
+
+	// The tag marking a server the control panel created. Backups and idle shutdown select on it, so a
+	// server not carrying it is left alone by both.
+	ManagedTag   string
+	ManagedValue string
+
+	PublisherStackName string
+	// AmiParameter is the public SSM parameter holding the AMI a new server launches from.
+	AmiParameter string
+	// MaxServers caps how many servers can exist at once, whatever a caller asks for.
+	MaxServers int
 
 	FrontEndDomain string
 	HostedZoneId   string
@@ -51,6 +67,7 @@ type Config struct {
 
 	ControlLambdaAssetDir string
 	UpdateDnsAssetDir     string
+	IdleShutdownAssetDir  string
 }
 
 func LoadConfig() (Config, error) {
@@ -65,6 +82,16 @@ func LoadConfig() (Config, error) {
 		// Deliberately not the name of the CloudFormation stack this replaces: the two stand side by
 		// side until the old one is deleted.
 		ControlPanelStackName: stringEnv("CONTROL_PANEL_STACK_NAME", "game-server-controlpanel-cdk"),
+		//Must match the game-server-*-cfn pattern the deploy role is scoped to.
+		FleetStackName: stringEnv("FLEET_STACK_NAME", "game-server-fleet-cfn"),
+
+		ManagedTag:   stringEnv("MANAGED_TAG", "managed-by"),
+		ManagedValue: stringEnv("MANAGED_VALUE", "control-panel"),
+
+		PublisherStackName: stringEnv("PUBLISHER_STACK_NAME", "GameServerAssetPublisher"),
+		AmiParameter: stringEnv("AMI_PARAMETER",
+			"/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"),
+		MaxServers: intEnv("MAX_SERVERS", 10),
 
 		FrontEndDomain: stringEnv("FRONTEND_DOMAIN", ""),
 		HostedZoneId:   stringEnv("HOSTED_ZONE_ID", ""),
@@ -79,6 +106,7 @@ func LoadConfig() (Config, error) {
 
 		ControlLambdaAssetDir: "../build/lambda/control",
 		UpdateDnsAssetDir:     "../build/lambda/update-dns",
+		IdleShutdownAssetDir:  "../build/lambda/idle-shutdown",
 	}
 
 	if config.FrontEndDomain != "" {
@@ -143,6 +171,18 @@ func requiredEnv(key string) string {
 		panic(fmt.Sprintf("required config value %s is empty", key))
 	}
 	return value
+}
+
+func intEnv(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		panic(fmt.Sprintf("invalid integer value for %s: %q", key, value))
+	}
+	return parsed
 }
 
 func stringEnv(key, fallback string) string {
