@@ -13,6 +13,9 @@ import (
 // Control Panel stack only knows once it has created them.
 type ControlPanelOutputs struct {
 	ControlPanelBucketArn string
+	//Publishing new files is not enough on its own: CloudFront keeps serving the cached ones until this
+	//distribution is invalidated.
+	DistributionId string
 	// The host the control panel is served on, which is the custom domain when one is set. Cognito
 	// accepts callback URLs only under that host.
 	ControlPanelUrl string
@@ -53,6 +56,7 @@ func lookupControlPanelOutputs(stackName, region string) (ControlPanelOutputs, b
 
 	outputs := ControlPanelOutputs{
 		ControlPanelBucketArn: values["S3Bucket"],
+		DistributionId:        values["CloudFrontDistributionId"],
 		ControlPanelUrl:       values["ControlPanelUrl"],
 		ApiUrl:                values["ControlApiUrl"],
 		UserPoolId:            values["CognitoUserPoolId"],
@@ -65,7 +69,8 @@ func lookupControlPanelOutputs(stackName, region string) (ControlPanelOutputs, b
 	var missing []string
 	for key, value := range map[string]string{
 		"S3Bucket": outputs.ControlPanelBucketArn, "ControlPanelUrl": outputs.ControlPanelUrl,
-		"ControlApiUrl": outputs.ApiUrl, "CognitoUserPoolId": outputs.UserPoolId,
+		"CloudFrontDistributionId": outputs.DistributionId,
+		"ControlApiUrl":            outputs.ApiUrl, "CognitoUserPoolId": outputs.UserPoolId,
 		"CognitoClientID": outputs.ClientId, "CognitoDomainName": outputs.CognitoDomain,
 		"TagName": outputs.TagName, "TagValue": outputs.TagValue,
 	} {

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awscloudfront"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsiam"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awss3"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awss3deployment"
@@ -31,8 +32,10 @@ type AssetPublisherStackProps struct {
 // ControlPanelDeployment is set once the Control Panel stack exists to publish into. Until then there is
 // no bucket to deploy to and the control panel is left out of this stack entirely.
 type ControlPanelDeployment struct {
-	BucketArn string
-	SourceDir string
+	BucketArn       string
+	DistributionId  string
+	ControlPanelUrl string
+	SourceDir       string
 }
 
 // LambdaKeys holds the content-addressed S3 keys (relative to AssetKeyPrefix) that each Lambda zip was
@@ -110,13 +113,16 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 				jsii.String(controlPanel.BucketArn)),
 			Prune:          jsii.Bool(true),
 			RetainOnDelete: jsii.Bool(true),
+			Distribution: awscloudfront.Distribution_FromDistributionAttributes(stack, jsii.String("WebDistribution"),
+				&awscloudfront.DistributionAttributes{
+					DistributionId: jsii.String(controlPanel.DistributionId),
+					DomainName:     jsii.String(strings.TrimPrefix(controlPanel.ControlPanelUrl, "https://")),
+				}),
+			DistributionPaths: jsii.Strings("/*"),
 		})
 	}
 
-	// These are the values to pass as --parameter-overrides to `aws cloudformation deploy` for
-	// the Control Panel stack and
-	// cfn/server-stack.yaml (GameServer, composed as ScriptsBaseUrl + "/<script>", e.g.
-	// ScriptsBaseUrl + "/Valheim/install.sh"). See the root README.
+	// The Fleet stack reads these at synth time to resolve each game template's script URL and digest.
 	awscdk.NewCfnOutput(stack, jsii.String("AssetBucketName"), &awscdk.CfnOutputProps{
 		Value: jsii.String(config.AssetBucketName),
 	})
@@ -189,7 +195,12 @@ func prepareControlPanel(config Config) (*ControlPanelDeployment, error) {
 	}
 
 	fmt.Printf("Staged the control panel for %s from %s\n", outputs.ControlPanelBucketArn, config.LocalControlPanelBuildDir)
-	return &ControlPanelDeployment{BucketArn: outputs.ControlPanelBucketArn, SourceDir: config.LocalControlPanelBuildDir}, nil
+	return &ControlPanelDeployment{
+		BucketArn:       outputs.ControlPanelBucketArn,
+		DistributionId:  outputs.DistributionId,
+		ControlPanelUrl: outputs.ControlPanelUrl,
+		SourceDir:       config.LocalControlPanelBuildDir,
+	}, nil
 }
 
 func env(config Config) *awscdk.Environment {
