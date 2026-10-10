@@ -632,3 +632,63 @@ table.mcAccessGrid tbody tr:hover td {
     font-size: 11px;
     font-weight: 600;
 }
+
+/* ############## New server ############## */
+
+.mcServersHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.mcNewServerForm {
+    border: 1px solid var(--grey-2);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+    background: var(--grey-1);
+}
+
+.mcNewServerFields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.mcNewServerFields label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--grey-3);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.mcNewServerFields input,
+.mcNewServerFields select {
+    padding: 6px 8px;
+    border: 1px solid var(--grey-2);
+    border-radius: 4px;
+    background: var(--white);
+    font-size: 13px;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text);
+    min-width: 150px;
+}
+
+.mcNewServerForm p {
+    margin: 12px 0 0;
+    font-size: 13px;
+}
+
+.mcNewServerActions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+}

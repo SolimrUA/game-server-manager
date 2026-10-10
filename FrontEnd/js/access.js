@@ -96,8 +96,9 @@ function mcAccessCellHtml(user, server) {
 
 function mcAccessServerLabel(server) {
   var game = mcGameDisplayName(server.GameName);
-  if (server.ServerName) {
-    return escapeHtml(server.ServerName) + '<span class="mcMuted mcAccessServerGame">' + escapeHtml(game) + '</span>';
+  var name = server.ServerName || server.ServerId;
+  if (name) {
+    return escapeHtml(name) + '<span class="mcMuted mcAccessServerGame">' + escapeHtml(game) + '</span>';
   }
   return escapeHtml(game);
 }

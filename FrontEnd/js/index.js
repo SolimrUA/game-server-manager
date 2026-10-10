@@ -5,6 +5,165 @@
 //boundary.
 var mcIsAdmin = false;
 
+var mcServerOptions = null;
+var mcServerOptionsPromise = null;
+
+//Fetched once and shared: the request is slow enough to be felt if it starts on the first click.
+function mcLoadServerOptions() {
+  if (!mcServerOptionsPromise) {
+    mcServerOptionsPromise = (async function () {
+      var jwt = await getJwt();
+      const response = await fetch(API_URL + 'serveroptions/' + query_string, {
+        method: 'get', headers: new Headers({ 'Authorization': jwt })
+      });
+      mcServerOptions = await response.json();
+      return mcServerOptions;
+    })().catch(function (e) {
+      mcServerOptionsPromise = null;
+      throw e;
+    });
+  }
+  return mcServerOptionsPromise;
+}
+
+function mcForgetServerOptions() {
+  mcServerOptions = null;
+  mcServerOptionsPromise = null;
+}
+
+function mcServerOptionsForm() {
+  return {
+    form: document.getElementById('mcNewServerForm'),
+    game: document.getElementById('mcNewServerGame'),
+    id: document.getElementById('mcNewServerId'),
+    version: document.getElementById('mcNewServerVersion'),
+    type: document.getElementById('mcNewServerType'),
+    volume: document.getElementById('mcNewServerVolume'),
+    snapshot: document.getElementById('mcNewServerSnapshot'),
+    hint: document.getElementById('mcNewServerHint')
+  };
+}
+
+function mcSelectedTemplate() {
+  var f = mcServerOptionsForm();
+  return (mcServerOptions.templates || []).filter(function (t) { return t.game === f.game.value; })[0];
+}
+
+//A game version is only asked for where the install needs an exact one, and restoring a world makes the
+//disk size come from the archive instead.
+function mcSyncNewServerForm() {
+  var f = mcServerOptionsForm();
+  var t = mcSelectedTemplate();
+  if (!t) return;
+  mcRenderSnapshotOptions(t.game);
+  f.version.parentElement.style.display = t.requiresGameVersion ? '' : 'none';
+  f.volume.parentElement.style.display = f.snapshot.value ? 'none' : '';
+  //A hidden field can't be required: the browser refuses to submit and has nothing to point at.
+  f.version.required = t.requiresGameVersion;
+  f.volume.required = !f.snapshot.value;
+  f.volume.placeholder = String(t.defaultVolumeSizeGib);
+  f.hint.textContent = f.snapshot.value
+    ? 'The new server starts from that archive, which is left untouched.'
+    : 'A name becomes the server\'s DNS record and cannot be changed later.';
+}
+
+//An archive restores onto one game's install, so only that game's are offered. One whose game can't be
+//told is offered everywhere rather than hidden.
+function mcRenderSnapshotOptions(game) {
+  var f = mcServerOptionsForm();
+  var previous = f.snapshot.value;
+  var usable = (mcServerOptions.snapshots || []).filter(function (s) {
+    return s.state === 'completed' && (!s.game || s.game === game);
+  });
+  f.snapshot.innerHTML = '<option value="">Nothing - a fresh world</option>' +
+    usable.map(function (s) {
+      return '<option value="' + s.snapshotId + '">' + escapeHtml(s.serverId || s.snapshotId) +
+        ' - ' + mcRelativeTimeText(s.startTime) + '</option>';
+    }).join('');
+  f.snapshot.value = usable.some(function (s) { return s.snapshotId === previous; }) ? previous : '';
+}
+
+function renderNewServerForm() {
+  var f = mcServerOptionsForm();
+  f.game.innerHTML = (mcServerOptions.templates || []).map(function (t) {
+    return '<option value="' + escapeHtml(t.game) + '">' + escapeHtml(t.displayName) + '</option>';
+  }).join('');
+  f.type.innerHTML = (mcServerOptions.instanceTypes || []).map(function (x) {
+    return '<option value="' + x + '"' + (x === 't3a.medium' ? ' selected' : '') + '>' + x + '</option>';
+  }).join('');
+  f.game.onchange = mcSyncNewServerForm;
+  f.snapshot.onchange = mcSyncNewServerForm;
+  mcSyncNewServerForm();
+}
+
+async function toggleNewServerForm(show) {
+  var f = mcServerOptionsForm();
+  if (!show) { f.form.style.display = 'none'; return; }
+  var button = document.getElementById('mcNewServerBtn');
+  if (!mcServerOptions) {
+    button.disabled = true;
+    try {
+      await mcLoadServerOptions();
+    } catch (e) {
+      console.log(e);
+      showAlert('Could not load the options for a new server');
+      return;
+    } finally {
+      button.disabled = false;
+    }
+  }
+  renderNewServerForm();
+  f.form.style.display = '';
+  f.id.focus();
+}
+
+async function createServer() {
+  var f = mcServerOptionsForm();
+  var create = document.getElementById('mcNewServerCreate');
+  create.disabled = true;
+  var jwt = await getJwt();
+  try {
+    const response = await fetch(API_URL + 'createserver/' + query_string +
+      '&game=' + encodeURIComponent(f.game.value) +
+      '&serverid=' + encodeURIComponent(f.id.value) +
+      '&instancetype=' + encodeURIComponent(f.type.value) +
+      '&gameversion=' + encodeURIComponent(f.version.value) +
+      '&volumesize=' + encodeURIComponent(f.snapshot.value ? '' : f.volume.value) +
+      '&snapshotid=' + encodeURIComponent(f.snapshot.value), {
+      method: 'get', headers: new Headers({ 'Authorization': jwt })
+    });
+    var msgdata = await response.json();
+    showAlert(msgdata[0]);
+    //Reloaded so the next form offers the archive this may have produced.
+    mcForgetServerOptions();
+    toggleNewServerForm(false);
+    f.id.value = '';
+    refreshData();
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not create the server');
+  }
+  create.disabled = false;
+}
+
+async function deleteServer(instanceId, label) {
+  if (!confirm('Delete ' + label + '?\n\nIts world is archived to a snapshot first, and its disk is kept, ' +
+               'so the server can be recreated from either.')) return;
+  var jwt = await getJwt();
+  try {
+    const response = await fetch(API_URL + 'deleteserver/' + query_string + '&instanceid=' + instanceId, {
+      method: 'get', headers: new Headers({ 'Authorization': jwt })
+    });
+    var msgdata = await response.json();
+    showAlert(msgdata[0]);
+    mcForgetServerOptions();
+    refreshData();
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not delete the server');
+  }
+}
+
 //getInfo resolves the caller's access template per server and returns the capabilities it grants, so the
 //front end never needs to know what a template contains.
 function mcCan(instance, capability) {
@@ -53,6 +212,7 @@ function mcGameStatus(instance) {
   if (serviceStatus === 'active') return { text: 'Running', badgeClass: 'running' };
   if (serviceStatus === 'failed') return { text: 'Crashed', badgeClass: 'error' };
   if (serviceStatus === 'inactive') return { text: 'Stopped', badgeClass: 'stopped' };
+  if (instance['InstallStatus'] === 'installing') return { text: 'Installing…', badgeClass: 'pending' };
   return { text: 'Starting…', badgeClass: 'pending' };
 }
 
@@ -76,6 +236,7 @@ function mcCombinedState(instance) {
   var serviceStatus = instance['GameStatus'] && instance['GameStatus'].serviceStatus;
   if (serviceStatus === 'failed') return { text: 'Error', badgeClass: 'error' };
   if (serviceStatus === 'inactive') return { text: 'Stopped (Game)', badgeClass: 'stopped' };
+  if (instance['InstallStatus'] === 'installing') return { text: 'Installing', badgeClass: 'pending' };
   if (serviceStatus !== 'active') return { text: 'Starting (Game)', badgeClass: 'pending' };
   if (instance['IdleShutdownStatus'] === 'triggered-once') return { text: 'Running (Idle)', badgeClass: 'idle' };
   return { text: 'Running', badgeClass: 'running' };
@@ -332,7 +493,10 @@ async function renderTable(data) {
         (canAutoShutdown ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
-            '<span class="mcMuted">Auto-shutdown: ' + escapeHtml(idleStatus.text) + '</span>') : '');
+            '<span class="mcMuted">Auto-shutdown: ' + escapeHtml(idleStatus.text) + '</span>') : '') +
+        (mcIsAdmin ?
+          mcActionClusterHtml('Server',
+            '<button type="button" class="btn mcDeleteServerBtn">Delete Server</button>') : '');
 
       var overviewHtml =
         mcKvHtml('Game', mcGameDisplayName(instance['GameName'])) +
@@ -421,6 +585,13 @@ async function renderTable(data) {
           if (!window.confirm('Remove mod "' + modName + '" from this server?')) return;
           showAlert('Removing mod…');
           deleteMod(instanceId, modName);
+        };
+      });
+
+      detailRow.querySelectorAll('.mcDeleteServerBtn').forEach(function (btn) {
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          deleteServer(instanceId, instance['ServerId'] || mcGameDisplayName(instance['GameName']));
         };
       });
 
@@ -793,6 +964,27 @@ function updateAccessLink() {
   if (access) access.style.display = mcIsAdmin ? '' : 'none';
 }
 
+//Creating a server is admin-only, so the button appears once the group membership is known.
+function mcWireNewServerForm() {
+  var button = document.getElementById('mcNewServerBtn');
+  if (!button) return;
+  button.style.display = mcIsAdmin ? '' : 'none';
+  if (!mcIsAdmin) return;
+
+  var f = mcServerOptionsForm();
+  mcLoadServerOptions().catch(function (e) { console.log(e); });
+  button.onclick = function () {
+    toggleNewServerForm(f.form.style.display === 'none');
+  };
+  document.getElementById('mcNewServerCancel').onclick = function () {
+    toggleNewServerForm(false);
+  };
+  f.form.onsubmit = function (event) {
+    event.preventDefault();
+    createServer();
+  };
+}
+
 async function updateAuthButtons() {
   const loggedIn = await isLoggedIn();
   const signInBtn = document.getElementById('signInBtn');
@@ -818,6 +1010,7 @@ async function init() {
   await updateAuthButtons();
   await loadIsAdmin();
   updateAccessLink();
+  mcWireNewServerForm();
 
   refreshData();
   setInterval(refreshData, 5000);

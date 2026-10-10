@@ -38,9 +38,26 @@ SPDX-License-Identifier: MIT-0 -->
 
   <div class="mcPageContent">
 
-    <div class="page-title">
+    <div class="page-title mcServersHeader">
       <h1>Game Servers</h1>
+      <button type="button" class="btn primary" id="mcNewServerBtn" style="display:none">New server</button>
     </div>
+
+    <form class="mcNewServerForm" id="mcNewServerForm" style="display:none">
+      <div class="mcNewServerFields">
+        <label>Game<select id="mcNewServerGame"></select></label>
+        <label>Server name<input type="text" id="mcNewServerId" placeholder="mygame" maxlength="32" required></label>
+        <label>Game version<input type="text" id="mcNewServerVersion" placeholder="1.22.7"></label>
+        <label>Size<select id="mcNewServerType"></select></label>
+        <label>Disk (GiB)<input type="number" id="mcNewServerVolume" min="8" placeholder="10"></label>
+        <label>Restore from<select id="mcNewServerSnapshot"></select></label>
+      </div>
+      <p class="mcMuted" id="mcNewServerHint"></p>
+      <div class="mcNewServerActions">
+        <button type="button" class="btn" id="mcNewServerCancel">Cancel</button>
+        <button type="submit" class="btn primary" id="mcNewServerCreate">Create</button>
+      </div>
+    </form>
 
     <table class="mcServerTable">
       <thead>
