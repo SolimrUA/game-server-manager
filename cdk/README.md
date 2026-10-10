@@ -1,19 +1,24 @@
 # CDK stacks
 
-The control panel: the web site, the API behind it, and the Lambda that acts on the game servers.
-`cdk deploy` creates `game-server-controlpanel-cdk`.
+Two stacks, deployed together with `cdk deploy --all`:
+
+- **Fleet** (`game-server-fleet-cfn`) - what every game server shares: the role they run under, a
+  security group per game, one backup plan, and the schedule that stops idle servers.
+- **Control Panel** - the web site, the API behind it, and the Lambda that acts on the game servers.
 
 Copy the block at the top of [`config.go`](config.go) into `.env`, which git ignores.
 
 ## Deploying
 
 ```bash
-cd CdkAssetPublisher && cdk deploy     # Lambda code and game scripts
-cd ../Cdk && cdk deploy                # this stack
-cd ../CdkAssetPublisher && cdk deploy  # the web site, from this stack's outputs
+cd ../CdkAssetPublisher && cdk deploy  # Lambda code and game scripts
+cd ../cdk && cdk deploy --all          # these stacks
+cd ../CdkAssetPublisher && cdk deploy  # the web site, from the control panel's outputs
 ```
 
-`CONTROL_PANEL_STACK_NAME` tells the publisher which stack's outputs fill `js/config.js`.
+The publisher runs twice because the control panel needs the scripts' digests, and the web site needs
+the control panel's outputs. `CONTROL_PANEL_STACK_NAME` tells the publisher which stack's outputs fill
+`js/config.js`.
 
 ## The custom domain is optional
 

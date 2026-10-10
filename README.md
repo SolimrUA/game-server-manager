@@ -17,25 +17,31 @@ behind it.
 
 ## Architecture
 
-The solution is three stacks:
+Four stacks, none of which contains a game server:
 
 - **Common** ([`cfn/common-infra.yaml`](cfn/common-infra.yaml)) - shared VPC/networking and the shared server-status S3 bucket. Deploy once per account+region.
-- **Control Panel** ([`cdk/`](cdk/)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront site. A CDK app; deploy once.
-- **Server** ([`cfn/server-stack.yaml`](cfn/server-stack.yaml)) - one EC2 game server and everything scoped to it (Security Group, backups, auto-shutdown, status reporting, a persistent EBS volume for world/mod data that outlives the instance). Deploy again for each game server you want to run.
+- **Asset Publisher** ([`CdkAssetPublisher/`](CdkAssetPublisher/)) - uploads your local game scripts, Lambda code and web site to a bucket you own.
+- **Fleet** ([`cdk/fleet.go`](cdk/fleet.go)) - what every server shares: the instance role, one Security Group per game, one backup plan, and the schedule that stops idle servers.
+- **Control Panel** ([`cdk/controlpanel.go`](cdk/controlpanel.go)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront site.
+
+The servers themselves are created at runtime from the control panel by an admin, not declared in any
+template. Each gets its own EBS data volume, DNS record and join password, and is picked up by the
+fleet's backups and idle shutdown through its `managed-by` tag. The games it can create, and their
+ports and defaults, come from [`cdk/templates.go`](cdk/templates.go).
 
 Each server also reports live player count, game version, and installed mods to the control panel - see [`docs/server-status.md`](docs/server-status.md) for the data flow and how to add reporting for a new game.
 
 Access is per user, per server, assigned from the control panel's own Access page rather than at deploy time - see [`docs/access.md`](docs/access.md).
 
-The Control Panel has no stack-level dependency on any Server stack - it discovers which EC2 instances to manage by an EC2 tag (`ID_TAG_NAME`/`ID_TAG_VALUE` in its config) at runtime. That tag must match on every Server stack's `IdTagName`/`IdTagValue`. The hosted zone must likewise match between the Control Panel and any Server stack using a custom `Domain`.
+The control panel finds the servers it manages by an EC2 tag (`ID_TAG_NAME`/`ID_TAG_VALUE` in its config), applied to every server it creates.
 
 ## Deploying
 
 None of these stacks fetch anything from the public internet at deploy time. The game install scripts, Lambda code, and web site files all come from an S3 bucket you control, published by `CdkAssetPublisher/`, so every install runs a version of the script you reviewed and pinned rather than whatever is on `main`.
 
-Each Server stack also verifies a script against a SHA256 hash pinned at deploy time (`GameServerSha256`, computed by `CdkAssetPublisher` - see step 2) before executing it, so even write access to that bucket can't get anything executed that you didn't approve.
+Each new server also verifies a script against a SHA256 hash the Fleet stack pinned at deploy time before executing it, so even write access to that bucket can't get anything executed that you didn't approve.
 
-Deploy in this order, from the repo root, with `aws cloudformation deploy`. The `--stack-name` values below are a fixed convention - copy them as-is (`game-server-<stack type>-cfn`, and `game-server-<game>-cfn` per server). Everything under `--parameter-overrides` is what you'll actually need to edit; placeholders are wrapped in `<...>`.
+Deploy in this order, from the repo root. The `--stack-name` values below are a fixed convention - copy them as-is.
 
 ### 1. Common - once per account+region
 
@@ -75,75 +81,67 @@ cdk deploy
 
 This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints the outputs you'll need for the next two steps:
 
-- `ScriptsBaseUrl` - the base URL for published game install scripts. A given game's `GameServer` parameter is this plus its script's path, e.g. `<ScriptsBaseUrl>/Valheim/install.sh` or `<ScriptsBaseUrl>/VintageStory/install.sh`.
-- `ValheimInstallSha256` / `ValheimStatusAgentSha256` / `VintageStoryInstallSha256` / `VintageStoryStatusAgentSha256` - SHA256 digests of each script's current content. Pass the relevant pair as a Server stack's `GameServerSha256`/`GameServerCompanionSha256` (see each game's deploy guide below) - the instance verifies each script it downloads before running it.
+- `ScriptsBaseUrl` - the base URL the published install scripts sit under.
+- `ValheimInstallSha256` / `ValheimStatusAgentSha256` / `VintageStoryInstallSha256` / `VintageStoryStatusAgentSha256` - SHA256 digests of each script's current content. A new server verifies each script it downloads against these before running it.
 
-Re-run `cdk deploy` here any time you change a game script. The new hash is what a Server stack verifies against, so pass it on that stack's next deploy.
+The Fleet stack reads these outputs at synth time, so re-run `cdk deploy` here whenever you change a
+game script, then deploy `cdk/` again to pick up the new digest.
 
-### 3. Control Panel - once
+### 3. Fleet and Control Panel - once
 
 ```bash
-cd Cdk
-cdk deploy
+cd cdk
+cdk deploy --all
 ```
 
 Configuration lives in `cdk/.env` - copy the block at the top of [`cdk/config.go`](cdk/config.go). The custom domain is optional; see [`cdk/README.md`](cdk/README.md).
 
 ### 4. Publish the control panel
 
-Run the publisher again, now that there is a Control Panel to read from:
+Run the publisher again, this time with a Control Panel to read from:
 
 ```bash
 cd CdkAssetPublisher
 cdk deploy
 ```
 
-This reads the Control Panel stack's outputs, writes them into `js/config.js`'s placeholders, and uploads the result to the bucket CloudFront serves. The staged copy is left in `build/controlpanel/` if you want to check what went up. Re-run it after any change under `FrontEnd/`; nothing else needs redeploying.
+This reads the Control Panel stack's outputs, writes them into `js/config.js`'s placeholders, uploads the result to the bucket CloudFront serves, and invalidates the distribution so the new files are served immediately. The staged copy is left in `build/controlpanel/` if you want to check what went up. Re-run it after any change under `FrontEnd/`; nothing else needs redeploying.
 
-### 5. Server - once per game
+### 5. Create a server
 
-Each game gets its own short deploy guide with the exact command for that game's ports and cartridge script:
+Sign in to the control panel as a member of the Cognito `admins` group and use **New server**. Pick the
+game, give the server an id (lowercase letters, digits and dashes - it names its DNS record, its data
+volume and its join password), and optionally restore it from an earlier server's archive snapshot
+instead of starting an empty world.
+
+Per-game notes:
 
 - [Valheim](docs/valheim.md)
 - [Vintage Story](docs/vintagestory.md)
 
-`GameName` names that server's resources (its EC2 `Name` tag becomes `game-server-<GameName>-ec2`) and should match the game in the stack name, e.g. `game-server-valheim-cfn`.
+Whichever game you create:
 
-Whichever game you deploy:
-
-- The stack waits for the install to finish, so `aws cloudformation deploy` takes several minutes and fails with a real error if the install does.
-- The server stops itself once it's had no players for 15 minutes (checked every 15 minutes, so up to ~30 minutes of real idle time). Start it again from the control panel, which is also what creates or updates its DNS record.
-- The join password is generated once and kept in SSM Parameter Store as a SecureString, outliving the stack, so deleting and redeploying reuses it rather than minting a new one. Read it with:
+- It installs itself on first boot, which takes a few minutes. The control panel shows the install
+  result, and uploads the instance's own log on failure so you never need to reach the instance.
+- It stops itself once it's had no players for two consecutive 15-minute checks. Start it again from
+  the control panel, which is also what creates or updates its DNS record.
+- Its join password is generated once and kept in SSM Parameter Store as a SecureString, keyed by
+  server id, so recreating a server under the same id reuses the password players already have:
 
   ```bash
-  aws ssm get-parameter --name game-password-<stack name> --with-decryption --query Parameter.Value --output text
+  aws ssm get-parameter --name game-password-<server id> --with-decryption --query Parameter.Value --output text
   ```
 
-### Redeploying a server without losing its world
+### Rebuilding a server without losing its world
 
-A Server stack's world/mod data lives on its own EBS volume (`GameDataVolume`), independent of the EC2 instance - deleting or replacing the instance never touches it, and the volume is retained even if the stack itself is deleted. An instance's `UserData` runs only once per instance (a cloud-init property, not something CloudFormation controls), so picking up an updated install script or template change means a fresh instance. The `CreateInstance` parameter (`true`/`false`, default `true`) does that without deleting the whole stack, which would take the data volume with it:
+Deleting a server from the control panel snapshots its data volume first and tags the snapshot with
+the server id, then terminates the instance. Creating a new server and choosing that snapshot under
+**Restore from** brings the world back - on a fresh instance, with whatever the current install script
+does. The snapshot is also how you take a server down while keeping its world for later, which is
+worth doing if you are near the server limit (`MAX_SERVERS`, 10 by default).
 
-```bash
-# 1. stop the game cleanly first (control panel Stop button, or):
-aws ec2 stop-instances --instance-ids <INSTANCE_ID>
-aws ec2 wait instance-stopped --instance-ids <INSTANCE_ID>
-
-# 2. if a script changed, republish it first to get a fresh hash:
-(cd CdkAssetPublisher && cdk deploy)
-
-# 3. tear down just the instance - the data volume, backups, IAM, etc. all stay
-aws cloudformation deploy --template-file cfn/server-stack.yaml \
-  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides CreateInstance=false
-
-# 4. bring up a fresh instance - the volume reattaches (not reformats)
-aws cloudformation deploy --template-file cfn/server-stack.yaml \
-  --stack-name game-server-<game>-cfn --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides CreateInstance=true \
-      GameServerSha256=<ValheimSha256 or VintageStoryInstallSha256 FROM STEP 2>
-```
-
-Any parameter left out of `--parameter-overrides` keeps its previous value, so step 4 only needs whatever actually changed - typically just the hash from a fresh publish.
+A running server's data volume is independent of the instance: stopping, starting or resizing never
+touches it.
 
 ## Security
 

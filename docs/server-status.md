@@ -6,12 +6,12 @@ game version, and installed mods - by writing a small JSON file to the shared st
 
 ## Where it's written
 
-`s3://<StatusBucketName>/status/<GameName>.json`, where `<GameName>` is that server stack's `GameName` parameter
-(e.g. `vintagestory`, `valheim`). This is why `GameName` must be unique per server stack: it names the EC2 instance
-and doubles as the status object's key.
+`s3://<StatusBucketName>/status/<server id>.json`, where `<server id>` is the id the server was created with
+(e.g. `vintagestory`, `valheim`). This is why a server id must be unique: it names the instance, its DNS record
+and its status object.
 
-The EC2 instance role (`GamingServerIamRole` in `cfn/server-stack.yaml`) is granted `s3:PutObject` scoped to
-exactly that one key. Nothing else in the bucket is writable by the instance.
+The shared instance role (`GameServerRole` in [`cdk/fleet.go`](../cdk/fleet.go)) is granted `s3:PutObject` under
+the `status/` and `worlds/` prefixes. Nothing else in the bucket is writable by an instance.
 
 ## Who writes it
 
