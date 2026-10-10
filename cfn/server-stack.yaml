@@ -508,6 +508,10 @@ Resources:
                 Resource: arn:aws:backup:*:*:backup-vault:*
 
   KmsKey:
+      #Retained alongside BackupVault: the recovery points are encrypted with this key, so losing it
+      #makes a retained vault useless.
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Type: AWS::KMS::Key
       Properties:
         Description: "Encryption key gaming server backups"
@@ -525,6 +529,9 @@ Resources:
 
   BackupVault:
     Type: "AWS::Backup::BackupVault"
+    #Holds the recovery points, so it outlives the stack that made it.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BackupVaultName: !Sub "${AWS::StackName}-backup-vault-daily"
       EncryptionKeyArn: !GetAtt KmsKey.Arn
