@@ -81,9 +81,9 @@ function mcCombinedState(instance) {
   return { text: 'Running', badgeClass: 'running' };
 }
 
-// The resize Lambda takes a slug, not an instance type: it resolves one through a fixed
-// micro/small/medium/large -> t3a.* map of environment variables (cfn/control-panel.yaml's
-// StartStopLambda), so a size with no mapping there can't be offered here.
+// The control Lambda takes a slug, not an instance type: it resolves one through a fixed
+// micro/small/medium/large -> t3a.* map of environment variables, so a size with no mapping there
+// can't be offered here.
 var MC_RESIZE_OPTIONS = [
   { value: 'micro', type: 't3a.micro' },
   { value: 'small', type: 't3a.small' },

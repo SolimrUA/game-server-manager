@@ -6,3 +6,6 @@ CdkAssetPublisher/cdk-asset-publisher
 FrontEnd/js/index.js
 docs/*requirements.md
 CLAUDE.md
+cdk/.env
+cdk/cdk.out/
+cdk/cdk

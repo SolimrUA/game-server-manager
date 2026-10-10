@@ -19,10 +19,13 @@ const localConfigFile = ".env"
 // CREATE_ASSET_BUCKET=true
 // ASSET_KEY_PREFIX=personal-game-server-manager/v1
 //
+// Optional. The Control Panel stack whose outputs fill js/config.js.
+// CONTROL_PANEL_STACK_NAME=game-server-controlpanel-cfn
+//
 // Optional path overrides, relative to CdkAssetPublisher/.
 // LOCAL_ASSET_BUILD_DIR=../build/assets
+// LOCAL_CONTROL_PANEL_BUILD_DIR=../build/controlpanel
 // LOCAL_LAMBDA_BUILD_DIR=../build/assets/Lambda
-// LOCAL_FRONTEND_BUILD_DIR=../build/assets/FrontEnd
 // LOCAL_SCRIPTS_BUILD_DIR=../build/assets/scripts
 
 type Config struct {
@@ -33,10 +36,12 @@ type Config struct {
 	CreateAssetBucket bool
 	AssetKeyPrefix    string
 
-	LocalAssetBuildDir    string
-	LocalLambdaBuildDir   string
-	LocalFrontendBuildDir string
-	LocalScriptsBuildDir  string
+	ControlPanelStackName string
+
+	LocalAssetBuildDir        string
+	LocalControlPanelBuildDir string
+	LocalLambdaBuildDir       string
+	LocalScriptsBuildDir      string
 }
 
 func LoadConfig() (Config, error) {
@@ -51,11 +56,13 @@ func LoadConfig() (Config, error) {
 		CreateAssetBucket: boolEnv("CREATE_ASSET_BUCKET", true),
 		AssetKeyPrefix:    stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
 
-		LocalAssetBuildDir: stringEnv("LOCAL_ASSET_BUILD_DIR", "../build/assets"),
+		ControlPanelStackName: stringEnv("CONTROL_PANEL_STACK_NAME", "game-server-controlpanel-cfn"),
+
+		LocalAssetBuildDir:        stringEnv("LOCAL_ASSET_BUILD_DIR", "../build/assets"),
+		LocalControlPanelBuildDir: stringEnv("LOCAL_CONTROL_PANEL_BUILD_DIR", "../build/controlpanel"),
 	}
 
 	config.LocalLambdaBuildDir = stringEnv("LOCAL_LAMBDA_BUILD_DIR", config.LocalAssetBuildDir+"/Lambda")
-	config.LocalFrontendBuildDir = stringEnv("LOCAL_FRONTEND_BUILD_DIR", config.LocalAssetBuildDir+"/FrontEnd")
 	config.LocalScriptsBuildDir = stringEnv("LOCAL_SCRIPTS_BUILD_DIR", config.LocalAssetBuildDir+"/scripts")
 
 	if err := validateConfig(config); err != nil {
@@ -105,10 +112,10 @@ func loadEnvFile(path string) error {
 
 func validateConfig(config Config) error {
 	for label, path := range map[string]string{
-		"LOCAL_ASSET_BUILD_DIR":    config.LocalAssetBuildDir,
-		"LOCAL_LAMBDA_BUILD_DIR":   config.LocalLambdaBuildDir,
-		"LOCAL_FRONTEND_BUILD_DIR": config.LocalFrontendBuildDir,
-		"LOCAL_SCRIPTS_BUILD_DIR":  config.LocalScriptsBuildDir,
+		"LOCAL_ASSET_BUILD_DIR":         config.LocalAssetBuildDir,
+		"LOCAL_LAMBDA_BUILD_DIR":        config.LocalLambdaBuildDir,
+		"LOCAL_SCRIPTS_BUILD_DIR":       config.LocalScriptsBuildDir,
+		"LOCAL_CONTROL_PANEL_BUILD_DIR": config.LocalControlPanelBuildDir,
 	} {
 		if err := requireRepoBuildPath(label, path); err != nil {
 			return err

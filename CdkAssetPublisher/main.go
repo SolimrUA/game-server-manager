@@ -25,6 +25,14 @@ type AssetPublisherStackProps struct {
 	Config       Config
 	LambdaKeys   LambdaKeys
 	ScriptHashes ScriptHashes
+	ControlPanel *ControlPanelDeployment
+}
+
+// ControlPanelDeployment is set once the Control Panel stack exists to publish into. Until then there is
+// no bucket to deploy to and the control panel is left out of this stack entirely.
+type ControlPanelDeployment struct {
+	BucketArn string
+	SourceDir string
 }
 
 // LambdaKeys holds the content-addressed S3 keys (relative to AssetKeyPrefix) that each Lambda zip was
@@ -49,11 +57,13 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	var config Config
 	var lambdaKeys LambdaKeys
 	var scriptHashes ScriptHashes
+	var controlPanel *ControlPanelDeployment
 	if props != nil {
 		stackProps = props.StackProps
 		config = props.Config
 		lambdaKeys = props.LambdaKeys
 		scriptHashes = props.ScriptHashes
+		controlPanel = props.ControlPanel
 	}
 
 	stack := awscdk.NewStack(scope, &id, &stackProps)
@@ -90,8 +100,21 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 		Prune:                jsii.Bool(false),
 	})
 
+	// Straight to the bucket CloudFront serves. Prune keeps it to exactly what FrontEnd/ holds, and
+	// RetainOnDelete leaves the files alone when this deployment goes away - the Control Panel stack owns
+	// that bucket's lifecycle, not this one.
+	if controlPanel != nil {
+		awss3deployment.NewBucketDeployment(stack, jsii.String("PublishControlPanel"), &awss3deployment.BucketDeploymentProps{
+			Sources: &[]awss3deployment.ISource{awss3deployment.Source_Asset(jsii.String(controlPanel.SourceDir), nil)},
+			DestinationBucket: awss3.Bucket_FromBucketArn(stack, jsii.String("WebBucket"),
+				jsii.String(controlPanel.BucketArn)),
+			Prune:          jsii.Bool(true),
+			RetainOnDelete: jsii.Bool(true),
+		})
+	}
+
 	// These are the values to pass as --parameter-overrides to `aws cloudformation deploy` for
-	// cfn/control-panel.yaml (AssetsBucketName/AssetsKeyPrefix/StartStopLambdaKey/UpdateDnsLambdaKey) and
+	// the Control Panel stack and
 	// cfn/server-stack.yaml (GameServer, composed as ScriptsBaseUrl + "/<script>", e.g.
 	// ScriptsBaseUrl + "/Valheim/install.sh"). See the root README.
 	awscdk.NewCfnOutput(stack, jsii.String("AssetBucketName"), &awscdk.CfnOutputProps{
@@ -131,6 +154,9 @@ func main() {
 	lambdaKeys, scriptHashes, err := prepareAssets(config)
 	must(err)
 
+	controlPanel, err := prepareControlPanel(config)
+	must(err)
+
 	app := awscdk.NewApp(nil)
 	NewAssetPublisherStack(app, "GameServerAssetPublisher", &AssetPublisherStackProps{
 		StackProps: awscdk.StackProps{
@@ -139,8 +165,31 @@ func main() {
 		Config:       config,
 		LambdaKeys:   lambdaKeys,
 		ScriptHashes: scriptHashes,
+		ControlPanel: controlPanel,
 	})
 	app.Synth(nil)
+}
+
+// prepareControlPanel stages FrontEnd/ with config.js filled in from the Control Panel stack's outputs.
+// Returns nil - and says so - when that stack isn't readable yet, so a first install can publish the
+// scripts and Lambda code it needs before the Control Panel exists.
+func prepareControlPanel(config Config) (*ControlPanelDeployment, error) {
+	outputs, found, err := lookupControlPanelOutputs(config.ControlPanelStackName, config.AwsRegion)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		fmt.Printf("Skipping the control panel: couldn't read outputs from stack %q. "+
+			"Deploy the Control Panel first, then run this again.\n", config.ControlPanelStackName)
+		return nil, nil
+	}
+
+	if err := stageControlPanel(config.LocalControlPanelBuildDir, config.ControlPanelStackName, outputs); err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("Staged the control panel for %s from %s\n", outputs.ControlPanelBucketArn, config.LocalControlPanelBuildDir)
+	return &ControlPanelDeployment{BucketArn: outputs.ControlPanelBucketArn, SourceDir: config.LocalControlPanelBuildDir}, nil
 }
 
 func env(config Config) *awscdk.Environment {
@@ -156,10 +205,6 @@ func prepareAssets(config Config) (LambdaKeys, ScriptHashes, error) {
 	}
 
 	if err := copyDir("../scripts", config.LocalScriptsBuildDir); err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
-	}
-
-	if err := copyDir("../FrontEnd", config.LocalFrontendBuildDir); err != nil {
 		return LambdaKeys{}, ScriptHashes{}, err
 	}
 

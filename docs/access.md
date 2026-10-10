@@ -30,9 +30,9 @@ server. `autoshutdown` and `resize` are admin-only because they change what the 
 
 ## Where assignments live
 
-One DynamoDB item per user per server, in the `${StackName}-access` table created by
-[`cfn/control-panel.yaml`](../cfn/control-panel.yaml): partition key `userSub`, sort key `instanceId`, and
-a `role` attribute holding the template name. No item means no access, so revoking deletes the item and
+One DynamoDB item per user per server, in the table the Control Panel stack creates
+([`cdk/controlpanel.go`](../cdk/controlpanel.go)): partition key `userSub`, sort key `instanceId`, and a
+`role` attribute holding the template name. No item means no access, so revoking deletes the item and
 the table only ever holds real grants.
 
 Users themselves are only ever in Cognito. The table holds no copy of them beyond an `email` on each item

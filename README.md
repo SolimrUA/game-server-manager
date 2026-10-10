@@ -17,17 +17,17 @@ behind it.
 
 ## Architecture
 
-The solution is split into three CloudFormation templates under [`cfn/`](cfn/):
+The solution is three stacks:
 
 - **Common** ([`cfn/common-infra.yaml`](cfn/common-infra.yaml)) - shared VPC/networking and the shared server-status S3 bucket. Deploy once per account+region.
-- **Control Panel** ([`cfn/control-panel.yaml`](cfn/control-panel.yaml)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront web site. Deploy once.
+- **Control Panel** ([`cdk/`](cdk/)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront site. A CDK app; deploy once.
 - **Server** ([`cfn/server-stack.yaml`](cfn/server-stack.yaml)) - one EC2 game server and everything scoped to it (Security Group, backups, auto-shutdown, status reporting, a persistent EBS volume for world/mod data that outlives the instance). Deploy again for each game server you want to run.
 
 Each server also reports live player count, game version, and installed mods to the control panel - see [`docs/server-status.md`](docs/server-status.md) for the data flow and how to add reporting for a new game.
 
 Access is per user, per server, assigned from the control panel's own Access page rather than at deploy time - see [`docs/access.md`](docs/access.md).
 
-The Control Panel has no CloudFormation-level dependency on any Server stack - it discovers which EC2 instances to manage by an EC2 tag (`IdTagName`/`IdTagValue`) at runtime. That tag must be entered identically on the Control Panel stack and every Server stack. `HostedZoneId` must likewise match between the Control Panel stack and any Server stack using a custom `Domain`.
+The Control Panel has no stack-level dependency on any Server stack - it discovers which EC2 instances to manage by an EC2 tag (`ID_TAG_NAME`/`ID_TAG_VALUE` in its config) at runtime. That tag must match on every Server stack's `IdTagName`/`IdTagValue`. The hosted zone must likewise match between the Control Panel and any Server stack using a custom `Domain`.
 
 ## Deploying
 
@@ -47,11 +47,12 @@ aws cloudformation deploy \
 
 ### 2. Publish your assets - once per account+region
 
-`CdkAssetPublisher/` is a small Go CDK app that uploads your **local** copy of the game install scripts, Lambda code, and web site files to your own S3 bucket:
+`CdkAssetPublisher/` is a small Go CDK app that uploads your **local** copy of the game install scripts and Lambda code to your own S3 bucket:
 
 - all files under `scripts/` (one install script per game)
-- all files under `FrontEnd/`
 - zipped Lambda packages from `Lambda/*.py`
+
+It also publishes the web site, but straight to the bucket CloudFront serves rather than to the assets bucket - see [step 4](#4-publish-the-web-site). On a first install there is no Control Panel yet, so it says it is skipping the web site and carries on.
 
 From `CdkAssetPublisher/`, create a local `.env` (ignored by git) or export the same values in your shell:
 
@@ -74,36 +75,32 @@ cdk deploy
 
 This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints the outputs you'll need for the next two steps:
 
-- `AssetBucketName` / `AssetKeyPrefix` - pass straight through as the Control Panel's `AssetsBucketName`/`AssetsKeyPrefix` parameters below.
 - `ScriptsBaseUrl` - the base URL for published game install scripts. A given game's `GameServer` parameter is this plus its script's path, e.g. `<ScriptsBaseUrl>/Valheim/install.sh` or `<ScriptsBaseUrl>/VintageStory/install.sh`.
-- `StartStopLambdaKey` / `UpdateDnsLambdaKey` - content-hashed S3 keys for the two Lambda zips, e.g. `Lambda/gaming_server_start_stop-v1_0.<hash>.zip`. Pass these as the Control Panel's parameters of the same name; a change to the Lambda code always changes them, which is what makes CloudFormation redeploy the function.
 - `ValheimInstallSha256` / `ValheimStatusAgentSha256` / `VintageStoryInstallSha256` / `VintageStoryStatusAgentSha256` - SHA256 digests of each script's current content. Pass the relevant pair as a Server stack's `GameServerSha256`/`GameServerCompanionSha256` (see each game's deploy guide below) - the instance verifies each script it downloads before running it.
 
-Re-run `cdk deploy` here any time you change a script, Lambda code, or the front-end files. Front-end and game-script changes take effect on the next Control Panel/Server deploy automatically (same bucket/prefix); Lambda code changes need the Control Panel re-deployed with the new `StartStopLambdaKey`/`UpdateDnsLambdaKey` values from this step's output.
+Re-run `cdk deploy` here any time you change a game script. The new hash is what a Server stack verifies against, so pass it on that stack's next deploy.
 
-### 3. Control Panel - once, and again whenever the Lambda code changes
-
-This template is past CloudFormation's 51,200-byte limit for an inline template, so it has to be staged in a bucket you control - the assets bucket from step 2 will do:
+### 3. Control Panel - once
 
 ```bash
-aws cloudformation deploy \
-  --template-file cfn/control-panel.yaml \
-  --stack-name game-server-controlpanel-cfn \
-  --capabilities CAPABILITY_IAM \
-  --s3-bucket <AssetBucketName FROM STEP 2> \
-  --s3-prefix cfn-deploy-staging \
-  --parameter-overrides \
-      AssetsBucketName=<AssetBucketName FROM STEP 2> \
-      AssetsKeyPrefix=<AssetKeyPrefix FROM STEP 2> \
-      StartStopLambdaKey=<StartStopLambdaKey FROM STEP 2> \
-      UpdateDnsLambdaKey=<UpdateDnsLambdaKey FROM STEP 2> \
-      HostedZoneId=<YOUR_HOSTED_ZONE_ID> \
-      FrontEndDomain=<OPTIONAL_CONTROL_SITE_DOMAIN>
+cd Cdk
+cdk deploy
 ```
 
-`FrontEndDomain` is optional - omit it (or pass `FrontEndDomain=""`) to only use the default CloudFront domain.
+Configuration lives in `cdk/.env` - copy the block at the top of [`cdk/config.go`](cdk/config.go). The custom domain is optional; see [`cdk/README.md`](cdk/README.md).
 
-### 4. Server - once per game
+### 4. Publish the control panel
+
+Run the publisher again, now that there is a Control Panel to read from:
+
+```bash
+cd CdkAssetPublisher
+cdk deploy
+```
+
+This reads the Control Panel stack's outputs, writes them into `js/config.js`'s placeholders, and uploads the result to the bucket CloudFront serves. The staged copy is left in `build/controlpanel/` if you want to check what went up. Re-run it after any change under `FrontEnd/`; nothing else needs redeploying.
+
+### 5. Server - once per game
 
 Each game gets its own short deploy guide with the exact command for that game's ports and cartridge script:
 
