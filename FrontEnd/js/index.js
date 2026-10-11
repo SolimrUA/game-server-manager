@@ -393,10 +393,17 @@ function renderModsList(mods, canDelete, enabled) {
   }).join('') + '</ul>';
 }
 
-function mcInstallModFormHtml(gameName, enabled) {
+function mcInstallModFormHtml(gameName, enabled, gameVersion) {
   var hint = mcModSourceHint(gameName);
+  //Only Vintage Story resolves a mod against a game version, and a release that lists only older ones
+  //is reached by naming one of them here.
+  var version = gameName === 'vintagestory'
+    ? '<input type="text" class="mcModGameVersionInput" placeholder="' + escapeHtml(gameVersion || 'game version') +
+      '" title="Game version to install for - defaults to the one this server reports"' + (enabled ? '' : ' disabled') + '>'
+    : '';
   return '<div class="mcInstallModForm">' +
     '<input type="text" class="mcModRefInput" placeholder="' + escapeHtml(hint.placeholder) + '"' + (enabled ? '' : ' disabled') + '>' +
+    version +
     '<button type="button" class="btn mcInstallModBtn"' + (enabled ? '' : ' disabled') + '>Install</button>' +
     '</div>' +
     '<p class="mcModSourceHint">' + escapeHtml(hint.label) + (enabled ? '' : ' — start the server to install or remove mods') + '</p>';
@@ -413,10 +420,17 @@ async function renderTable(data) {
     var previouslyActiveTabEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcTab.active');
     var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
     // Same rebuild problem, applied to text being typed: without this, the refresh erases whatever is
-    // half-entered in the Install Mod field.
-    var previouslyModRefEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcModRefInput');
-    var previouslyModRefValue = previouslyModRefEl ? previouslyModRefEl.value : '';
-    var previouslyModRefFocused = previouslyModRefEl === document.activeElement;
+    // half-entered in the mod fields, and takes the caret with it.
+    var previousModInputs = ['.mcModRefInput', '.mcModGameVersionInput'].map(function (selector) {
+      var el = previouslyActiveDetail && previouslyActiveDetail.querySelector(selector);
+      return {
+        selector: selector,
+        value: el ? el.value : '',
+        focused: !!el && el === document.activeElement,
+        start: el && el.selectionStart,
+        end: el && el.selectionEnd
+      };
+    });
 
     if (instances.length === 0) {
       tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
@@ -525,7 +539,8 @@ async function renderTable(data) {
         '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' +
           renderModsList(status && status.mods, canContent, modsRunning) +
           (canContent ?
-            mcInstallModFormHtml(instance['GameName'], modsRunning) +
+            mcInstallModFormHtml(instance['GameName'], modsRunning,
+              instance['GameStatus'] && instance['GameStatus'].version) +
             '<p class="mcModsNote">Installing or removing a mod here can take a minute or two to show up in the list above. ' +
             'Changes only take effect after a restart:</p>' +
             mcRestartGameButtonHtml(modsRunning)
@@ -566,16 +581,20 @@ async function renderTable(data) {
       if (retryLink) retryLink.onclick = function (e) { e.stopPropagation(); retryWorldDownload(instanceId); };
 
       var modRefInput = detailRow.querySelector('.mcModRefInput');
-      if (modRefInput && instanceId === previouslySelectedInstanceId && previouslyModRefValue) {
-        modRefInput.value = previouslyModRefValue;
+      if (instanceId === previouslySelectedInstanceId) {
+        previousModInputs.forEach(function (previous) {
+          var el = detailRow.querySelector(previous.selector);
+          if (el && previous.value) el.value = previous.value;
+        });
       }
       var installModBtn = detailRow.querySelector('.mcInstallModBtn');
       if (installModBtn && !installModBtn.disabled) installModBtn.onclick = function (e) {
         e.stopPropagation();
         var modRef = modRefInput.value.trim();
         if (!modRef) return;
+        var versionInput = detailRow.querySelector('.mcModGameVersionInput');
         showAlert('Installing mod…');
-        installMod(instanceId, modRef);
+        installMod(instanceId, modRef, versionInput ? versionInput.value.trim() : '');
       };
       detailRow.querySelectorAll('.mcModDeleteBtn').forEach(function (btn) {
         if (btn.disabled) return;
@@ -623,9 +642,15 @@ async function renderTable(data) {
       }
 
       // Must follow the appendChild calls above: .focus() is a silent no-op on a detached node.
-      if (modRefInput && previouslyModRefFocused && instanceId === previouslySelectedInstanceId) {
-        modRefInput.focus();
-        modRefInput.setSelectionRange(modRefInput.value.length, modRefInput.value.length);
+      if (instanceId === previouslySelectedInstanceId) {
+        previousModInputs.forEach(function (previous) {
+          if (!previous.focused) return;
+          var el = detailRow.querySelector(previous.selector);
+          if (!el) return;
+          el.focus();
+          //Put back where it was, or every refresh moves the caret to the end of the field.
+          el.setSelectionRange(previous.start, previous.end);
+        });
       }
 
       // Deliberately not awaited: updates the dot without blocking the render
@@ -758,9 +783,10 @@ async function backupNow(instanceId) {
 }
 
 // modRef is whatever the admin pasted, resolved to an actual download server-side.
-async function installMod(instanceId, modRef) {
+async function installMod(instanceId, modRef, gameVersion) {
   var url = API_URL + "installmod/" + query_string +
-    (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "") + "&modref=" + encodeURIComponent(modRef);
+    (instanceId ? "&instanceid=" + encodeURIComponent(instanceId) : "") + "&modref=" + encodeURIComponent(modRef) +
+    "&modgameversion=" + encodeURIComponent(gameVersion || '');
   var jwt = await getJwt();
 
   var msg = await fetch(url, {

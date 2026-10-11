@@ -12,6 +12,9 @@ Create one from the control panel's **New server** form, picking Vintage Story -
   from the game's `/stats` console command, so if the player count looks wrong, check the regex in
   [`status_agent.py`](../scripts/VintageStory/status_agent.py) against what `/stats` prints on your
   server.
+- A mod is installed for a game version, and the control panel sends the one the server reports. A mod
+  whose newest release lists only older versions is installed by naming one of those in the game
+  version field beside the mod id.
 - Run `server.sh` commands as the `vintagestory` user
   (`sudo -u vintagestory /home/vintagestory/server/server.sh restart`), not as `ubuntu`: `screen` scopes
   sessions per-user, so another user won't find the session systemd created, group membership

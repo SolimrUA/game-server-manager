@@ -10,6 +10,8 @@ import random
 import re
 import shlex
 import time
+import urllib.parse
+import urllib.request
 
 
 #What each access template grants. Templates live here rather than in the table: the table holds only
@@ -248,8 +250,9 @@ def lambda_handler(event, context):
         if not gameName or not dataPath or not modref:
             return ("Missing instance/modref", info)
         #Vintage Story's moddb needs the server's game version as an explicit argument - left off, the
-        #server looks "current" up itself through a request that fails inside its own moddb client.
-        gameVersion = (i.get('GameStatus') or {}).get('version')
+        #server looks "current" up itself through a request that fails inside its own moddb client. An
+        #admin can name a different one to reach a release that lists only older versions.
+        gameVersion = (event.get('modGameVersion') or '').strip() or (i.get('GameStatus') or {}).get('version')
         try:
             statusmessage = installMod(i['InstanceId'], gameName, dataPath, modref, gameVersion)
         except Exception as e:
@@ -1098,12 +1101,42 @@ if not modid:
 print(modid)
 PYEOF'''
 
+MOD_DB_API = 'https://mods.vintagestory.at/api/mod/'
+
+
+def modVersionProblem(modref, gameVersion):
+    #moddb installs nothing and reports nothing when no release of the mod lists the game version it is
+    #given, so the reason is looked up here. None when the install should go ahead, which includes the
+    #registry being unreachable.
+    try:
+        with urllib.request.urlopen(MOD_DB_API + urllib.parse.quote(modref, safe=''), timeout=5) as response:
+            mod = json.loads(response.read()).get('mod') or {}
+        releases = mod.get('releases') or []
+    except Exception as e:
+        print("Couldn't check mod " + str(modref) + " against the mod registry: " + str(e))
+        return None
+
+    if not releases:
+        return "No mod called " + modref + " in the Vintage Story mod registry"
+    if any(gameVersion in (r.get('tags') or []) for r in releases):
+        return None
+
+    newest = releases[0]
+    return ("No release of " + modref + " lists game version " + gameVersion +
+            ". Its newest release (" + str(newest.get('modversion')) + ") lists " +
+            ", ".join(newest.get('tags') or []) +
+            " - install it by naming one of those as the game version")
+
+
 def installMod(instanceId, gameName, dataPath, modref, gameVersion=None):
     #Deliberately doesn't restart the game: an admin installing several mods in a row shouldn't pay a
     #restart each time, and calls restartGame once when ready.
     if gameName == 'vintagestory':
         if not gameVersion:
             return "Couldn't determine the server's current game version - try again once the status agent has reported it"
+        problem = modVersionProblem(modref, gameVersion)
+        if problem:
+            return problem
         serverCmd = 'moddb install ' + modref + ' ' + gameVersion
         commands = [
             'sudo -u vintagestory /home/vintagestory/server/server.sh command ' + shlex.quote(serverCmd),

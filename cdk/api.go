@@ -35,7 +35,7 @@ var Endpoints = []Endpoint{
 	{Path: "resumeidleshutdown", Command: "resumeIdleShutdown", Params: []string{"instanceid"}},
 	{Path: "restartgame", Command: "restartGame", Params: []string{"instanceid"}},
 	{Path: "updategame", Command: "updateGame", Params: []string{"instanceid"}},
-	{Path: "installmod", Command: "installMod", Params: []string{"instanceid", "modref"}},
+	{Path: "installmod", Command: "installMod", Params: []string{"instanceid", "modref", "modgameversion"}},
 	{Path: "deletemod", Command: "deleteMod", Params: []string{"instanceid", "modname"}},
 	{Path: "downloadworldstart", Command: "startWorldDownload", Params: []string{"instanceid", "scope"}},
 	{Path: "downloadworldstatus", Command: "getWorldDownloadStatus", Params: []string{"instanceid", "commandid", "s3key"}},
@@ -49,13 +49,14 @@ var Endpoints = []Endpoint{
 
 // paramNames maps a query-string parameter to the field the Lambda reads it as.
 var paramNames = map[string]string{
-	"instanceid": "instanceId",
-	"resize":     "reSizeType",
-	"modref":     "modref",
-	"modname":    "modname",
-	"scope":      "scope",
-	"commandid":  "commandId",
-	"s3key":      "s3Key",
+	"instanceid":     "instanceId",
+	"resize":         "reSizeType",
+	"modref":         "modref",
+	"modgameversion": "modGameVersion",
+	"modname":        "modname",
+	"scope":          "scope",
+	"commandid":      "commandId",
+	"s3key":          "s3Key",
 
 	"game":         "game",
 	"serverid":     "serverId",
