@@ -47,20 +47,6 @@ func addControlLambdaPermissions(stack awscdk.Stack, fn awslambda.Function, user
 		},
 	})
 
-	// Vault and role names follow a fixed convention per game, so they are derived from the game name.
-	// A tag lookup isn't an option for the role: the Resource Groups Tagging API doesn't index IAM roles.
-	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("backup:ListRecoveryPointsByBackupVault", "backup:StartBackupJob"),
-		Resources: jsii.Strings(fmt.Sprintf("arn:aws:backup:%s:%s:backup-vault:game-server-*-backup-vault-daily", region, account)),
-	})
-	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("iam:PassRole"),
-		Resources: jsii.Strings(fmt.Sprintf("arn:aws:iam::%s:role/service-role/game-server-*-cfn-backup-role", account)),
-		Conditions: &map[string]interface{}{
-			"StringEquals": map[string]string{"iam:PassedToService": "backup.amazonaws.com"},
-		},
-	})
-
 	// World downloads, mod management and game restarts all reach the instance through Run Command.
 	add(&awsiam.PolicyStatementProps{
 		Actions:   jsii.Strings("ssm:SendCommand"),
@@ -123,7 +109,8 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s:%s:security-group/*", region, account)),
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s:%s:network-interface/*", region, account)),
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s:%s:volume/*", region, account)),
-			//Restoring a world starts the volume from a snapshot. Snapshot ARNs carry no account id.
+			//A server started from a backup has its volume made from that snapshot as it launches.
+			//Snapshot ARNs carry no account id.
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", region)),
 		},
 	})
@@ -143,7 +130,7 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 		},
 	})
 	// The data volume is tagged after the launch that created it, because tagging volumes during the
-	// launch would tag the root disk too and the backup plan selects on that tag.
+	// launch would tag the root disk too, and the backup Lambda selects data volumes on that tag.
 	add(&awsiam.PolicyStatementProps{
 		Actions:   jsii.Strings("ec2:CreateTags"),
 		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s:%s:volume/*", region, account)),
@@ -152,9 +139,9 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 		},
 	})
 
-	// Attaching, detaching and terminating are limited to servers already carrying the managed tag.
+	// Terminating is limited to servers already carrying the managed tag.
 	add(&awsiam.PolicyStatementProps{
-		Actions: jsii.Strings("ec2:AttachVolume", "ec2:DetachVolume", "ec2:TerminateInstances"),
+		Actions: jsii.Strings("ec2:TerminateInstances"),
 		Resources: &[]*string{
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, account)),
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s:%s:volume/*", region, account)),
@@ -165,22 +152,9 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 	})
 
 	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("ec2:DescribeImages", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups"),
+		Actions: jsii.Strings("ec2:DescribeImages", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups",
+			"ec2:DescribeSnapshots"),
 		Resources: jsii.Strings("*"),
-	})
-
-	// Archiving a decommissioned server, so its world can be restored into a new one later.
-	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("ec2:CreateSnapshot", "ec2:DescribeSnapshots"),
-		Resources: jsii.Strings("*"),
-	})
-	add(&awsiam.PolicyStatementProps{
-		Actions: jsii.Strings("ec2:CreateTags"),
-		//Snapshot ARNs carry no account id.
-		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", region)),
-		Conditions: &map[string]interface{}{
-			"StringEquals": map[string]string{"ec2:CreateAction": "CreateSnapshot"},
-		},
 	})
 
 	// The installer reports its outcome through a presigned PUT, which only works if the signer itself
@@ -194,8 +168,8 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 		Actions:   jsii.Strings("ssm:GetParameter"),
 		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ssm:%s::parameter%s", region, config.AmiParameter)),
 	})
-	// A new server's join password is written here before it boots, and read back to carry an archived
-	// server's password onto the server restored from it.
+	// A new server's join password is written here before it boots, and read back to carry the password
+	// of the server a backup was taken from.
 	add(&awsiam.PolicyStatementProps{
 		Actions:   jsii.Strings("ssm:PutParameter", "ssm:GetParameter"),
 		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-password-*", region, account)),
@@ -208,19 +182,9 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 			"StringEquals": map[string]string{"iam:PassedToService": "ec2.amazonaws.com"},
 		},
 	})
-	// The shared vault and role are named by CDK, so they fall outside the by-convention patterns the
-	// per-game vaults match.
+	//Reading when a server was last backed up. Taking one is the backup Lambda's job.
 	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("backup:StartBackupJob", "backup:ListRecoveryPointsByBackupVault"),
+		Actions:   jsii.Strings("backup:ListRecoveryPointsByBackupVault"),
 		Resources: &[]*string{fleet.BackupVaultArn},
 	})
-	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("iam:PassRole"),
-		Resources: &[]*string{fleet.BackupRoleArn},
-		Conditions: &map[string]interface{}{
-			"StringEquals": map[string]string{"iam:PassedToService": "backup.amazonaws.com"},
-		},
-	})
-
-	_ = fleet
 }

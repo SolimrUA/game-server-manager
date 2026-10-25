@@ -108,8 +108,13 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 		MaxAttempts: jsii.Number(5),
 		BackoffRate: jsii.Number(2),
 	})
+	// A fresh instance has no address for a moment, so naming it waits for one.
+	afterLaunch := awsstepfunctions.NewChoice(stack, jsii.String("HasDomain"), nil).
+		When(awsstepfunctions.Condition_IsPresent(jsii.String("$.domainName")), dnsTask, nil).
+		Otherwise(awsstepfunctions.NewSucceed(stack, jsii.String("NothingToName"), nil))
+
 	dnsStateMachine := awsstepfunctions.NewStateMachine(stack, jsii.String("UpdateDnsStateMachine"), &awsstepfunctions.StateMachineProps{
-		DefinitionBody:   awsstepfunctions.DefinitionBody_FromChainable(dnsTask),
+		DefinitionBody:   awsstepfunctions.DefinitionBody_FromChainable(afterLaunch),
 		StateMachineType: awsstepfunctions.StateMachineType_STANDARD,
 		Comment:          jsii.String("Updates DNS while minimising Lambda execution runtime"),
 	})
@@ -142,19 +147,22 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 			"amiParameter":       jsii.String(config.AmiParameter),
 			"managedTag":         jsii.String(config.ManagedTag),
 			"managedValue":       jsii.String(config.ManagedValue),
+			"backupTag":          jsii.String(config.BackupTag),
+			"backupValue":        jsii.String(config.BackupValue),
 			"idTagName":          jsii.String(config.IdTagName),
 			"idTagValue":         jsii.String(config.IdTagValue),
 			"hostedZoneId":       jsii.String(config.HostedZoneId),
 			"hostedZoneName":     jsii.String(config.HostedZoneName),
 			"maxServers":         jsii.String(fmt.Sprintf("%d", config.MaxServers)),
 			"backupVaultName":    fleet.BackupVaultName,
-			"backupRoleArn":      fleet.BackupRoleArn,
+			"backupLambdaName":   fleet.BackupLambda.FunctionName(),
 		},
 	})
 
 	accessTable.GrantReadWriteData(controlLambda)
 	dnsStateMachine.GrantStartExecution(controlLambda)
 	addControlLambdaPermissions(stack, controlLambda, userPool, statusBucketName, config)
+	fleet.BackupLambda.GrantInvoke(controlLambda)
 	addServerCreationPermissions(stack, controlLambda, fleet, config, statusBucketName)
 
 	// --- the API ------------------------------------------------------------

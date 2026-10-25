@@ -27,11 +27,11 @@ type Fleet struct {
 	SecurityGroupIds   map[string]*string
 	BackupVaultName    *string
 	BackupVaultArn     *string
-	BackupRoleArn      *string
+	BackupLambda       awslambda.IFunction
 }
 
 // NewFleetStack holds what every game server shares: the role they run under, a security group per
-// game, one backup plan, and the schedule that stops idle servers.
+// game, the vault its backups are kept in, and the schedules that back servers up and stop idle ones.
 //
 // Backups and idle shutdown both select servers by the managed tag, so each covers every server the
 // control panel created and nothing else.
@@ -48,6 +48,7 @@ func NewFleetStack(scope constructs.Construct, id string, props *FleetStackProps
 	profile := addServerRole(stack, statusBucketName)
 	groups := addSecurityGroups(stack, vpc)
 	vault, backupRole := addBackups(stack, config)
+	backupLambda := addServerBackups(stack, config, statusBucketName, vault, backupRole)
 	addIdleShutdown(stack, config, statusBucketName)
 
 	return Fleet{
@@ -56,7 +57,7 @@ func NewFleetStack(scope constructs.Construct, id string, props *FleetStackProps
 		SecurityGroupIds:   groups,
 		BackupVaultName:    vault.BackupVaultName(),
 		BackupVaultArn:     vault.BackupVaultArn(),
-		BackupRoleArn:      backupRole.RoleArn(),
+		BackupLambda:       backupLambda,
 	}
 }
 
@@ -113,8 +114,9 @@ func addSecurityGroups(stack awscdk.Stack, vpc awsec2.IVpc) map[string]*string {
 	return ids
 }
 
-// addBackups creates one plan for every server. The selection is by tag, so a server is covered as
-// soon as the control panel tags it.
+// addBackups creates the vault game server backups are kept in, and the role that writes them. What
+// gets backed up, and when, is decided by the backup Lambda rather than by a plan: a plan can only
+// schedule unconditionally and expire by age.
 func addBackups(stack awscdk.Stack, config Config) (awsbackup.BackupVault, awsiam.IRole) {
 	key := awskms.NewKey(stack, jsii.String("BackupKey"), &awskms.KeyProps{
 		Description:       jsii.String("Encrypts game server backups"),
@@ -128,33 +130,81 @@ func addBackups(stack awscdk.Stack, config Config) (awsbackup.BackupVault, awsia
 		RemovalPolicy: awscdk.RemovalPolicy_RETAIN,
 	})
 
-	plan := awsbackup.NewBackupPlan(stack, jsii.String("BackupPlan"), &awsbackup.BackupPlanProps{
-		BackupVault: vault,
-	})
-	plan.AddRule(awsbackup.NewBackupPlanRule(&awsbackup.BackupPlanRuleProps{
-		RuleName:           jsii.String("daily-backups"),
-		ScheduleExpression: awsevents.Schedule_Cron(&awsevents.CronOptions{Hour: jsii.String("5"), Minute: jsii.String("0")}),
-		DeleteAfter:        awscdk.Duration_Days(jsii.Number(7)),
-	}))
-
-	plan.AddSelection(jsii.String("Servers"), &awsbackup.BackupSelectionOptions{
-		Resources: &[]awsbackup.BackupResource{
-			awsbackup.BackupResource_FromTag(jsii.String(config.ManagedTag), jsii.String(config.ManagedValue), ""),
-		},
-	})
-
-	//Its own role, separate from the one the scheduled selection uses: AWS Backup refuses a second
-	//selection with an identical document, so that selection can never be replaced to swap its role.
-	onDemandRole := awsiam.NewRole(stack, jsii.String("OnDemandBackupRole"), &awsiam.RoleProps{
+	backupRole := awsiam.NewRole(stack, jsii.String("OnDemandBackupRole"), &awsiam.RoleProps{
 		AssumedBy:   awsiam.NewServicePrincipal(jsii.String("backup.amazonaws.com"), nil),
-		Description: jsii.String("Used by the control panel's Backup Now action"),
+		Description: jsii.String("Writes and restores game server backups"),
 		ManagedPolicies: &[]awsiam.IManagedPolicy{
 			awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("service-role/AWSBackupServiceRolePolicyForBackup")),
 			awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("service-role/AWSBackupServiceRolePolicyForRestores")),
 		},
 	})
 
-	return vault, onDemandRole
+	return vault, backupRole
+}
+
+// addServerBackups backs up a server only when it has changed since its last backup, and keeps the
+// most recent few. Both are decisions AWS Backup's own scheduling can't express.
+func addServerBackups(stack awscdk.Stack, config Config, statusBucketName *string,
+	vault awsbackup.BackupVault, backupRole awsiam.IRole) awslambda.IFunction {
+
+	fn := awslambda.NewFunction(stack, jsii.String("BackupServersLambda"), &awslambda.FunctionProps{
+		Runtime:     awslambda.Runtime_PROVIDED_AL2023(),
+		Handler:     jsii.String("bootstrap"),
+		Code:        awslambda.Code_FromAsset(jsii.String(config.BackupLambdaAssetDir), nil),
+		MemorySize:  jsii.Number(128),
+		Timeout:     awscdk.Duration_Minutes(jsii.Number(5)),
+		Description: jsii.String("Backs up game servers that changed, and keeps the most recent few"),
+		Environment: &map[string]*string{
+			"backupVaultName": vault.BackupVaultName(),
+			"backupRoleArn":   backupRole.RoleArn(),
+			"statusBucket":    statusBucketName,
+			"backupTag":       jsii.String(config.BackupTag),
+			"backupValue":     jsii.String(config.BackupValue),
+			"keepPerServer":   jsii.String(fmt.Sprintf("%d", config.KeepBackupsPerServer)),
+			"supersededDays":  jsii.String(fmt.Sprintf("%d", config.SupersededBackupDays)),
+			"accountId":       stack.Account(),
+		},
+	})
+
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("ec2:DescribeVolumes", "ec2:DescribeInstances"),
+		Resources: jsii.Strings("*"),
+	}))
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("backup:StartBackupJob", "backup:ListRecoveryPointsByBackupVault"),
+		Resources: jsii.Strings(*vault.BackupVaultArn()),
+	}))
+	//Authorised against the recovery point as well as the vault. A volume's recovery point is a
+	//snapshot, whose ARN carries no account id.
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions: jsii.Strings("backup:DeleteRecoveryPoint", "backup:UpdateRecoveryPointLifecycle"),
+		Resources: &[]*string{
+			vault.BackupVaultArn(),
+			jsii.String(fmt.Sprintf("arn:aws:ec2:%s::image/*", *stack.Region())),
+			jsii.String(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", *stack.Region())),
+		},
+	}))
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("s3:GetObject"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:s3:::%s/status/*", *statusBucketName)),
+	}))
+	//Handed to AWS Backup, which does the reading of the instance and its volumes itself.
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("iam:PassRole"),
+		Resources: &[]*string{backupRole.RoleArn()},
+		Conditions: &map[string]interface{}{
+			"StringEquals": map[string]string{"iam:PassedToService": "backup.amazonaws.com"},
+		},
+	}))
+
+	awsevents.NewRule(stack, jsii.String("BackupSchedule"), &awsevents.RuleProps{
+		Description: jsii.String("Decides each night which game servers need backing up"),
+		Schedule: awsevents.Schedule_Cron(&awsevents.CronOptions{
+			Hour: jsii.String("5"), Minute: jsii.String("0")}),
+		Targets: &[]awsevents.IRuleTarget{awseventstargets.NewLambdaFunction(fn, nil)},
+	})
+
+	return fn
 }
 
 // addIdleShutdown stops servers nobody is playing. One schedule covers them all; a server carrying the

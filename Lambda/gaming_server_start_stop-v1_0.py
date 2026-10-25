@@ -46,13 +46,17 @@ ADMIN_ONLY_COMMANDS = ('getAccess', 'saveAccess', 'createServer', 'deleteServer'
 #is how the first one gets created.
 INSTANCE_FREE_COMMANDS = ('createServer', 'getAccess', 'saveAccess', 'getServerOptions')
 
-#Mirrors the instance types the resize action offers, and the allowlist the Lambda's own IAM policy
-#conditions ec2:RunInstances on.
 #Read by the fleet's idle-shutdown Lambda to skip a server, so both must agree on these.
 IDLE_PAUSE_TAG = 'idle-shutdown'
 IDLE_PAUSE_VALUE = 'paused'
 
+#Mirrors the instance types the resize action offers, and the allowlist the Lambda's own IAM policy
+#conditions ec2:RunInstances on.
 ALLOWED_INSTANCE_TYPES = ('t3a.micro', 't3a.small', 't3a.medium', 't3a.large')
+
+#Where a server's data volume attaches. The install scripts find it by looking for the one disk that
+#isn't the root, so this only has to be free.
+DATA_DEVICE_NAME = '/dev/sdf'
 
 #A server id names its DNS record, its join-password parameter and its status object.
 SERVER_ID_PATTERN = re.compile(r'^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$')
@@ -382,7 +386,7 @@ def getInfo(tagKey, tagValue, isAdmin=False, accessMap=None):
                                      for m in instance.get('BlockDeviceMappings', [])
                                      if m.get('DeviceName') == '/dev/sdf'), None)
                 infoDict['DataVolumeId'] = dataVolumeId
-                infoDict['LastBackupTime'] = getLastBackupTime(gameName, serverId, dataVolumeId)
+                infoDict['LastBackupTime'] = getLastBackupTime(dataVolumeId)
                 infoDict['IdleShutdownStatus'] = getIdleShutdownStatus(instance.get('Tags', []))
                 info["Instances"].append(infoDict)
     return(info)
@@ -483,15 +487,17 @@ def readJoinPassword(serverId):
 
 def ensureJoinPassword(serverId, inheritFrom=None):
     #The installer reads this parameter, so it has to hold the right value before the instance boots.
+    #Says where the password came from: 'kept' when this id already had one, 'inherited' from another
+    #server's, or 'new'.
     if readJoinPassword(serverId):
-        return False
+        return 'kept'
 
     inherited = readJoinPassword(inheritFrom) if inheritFrom else None
-    #A restored volume carries the archived server's config, which holds that server's password. Copying
-    #it keeps the parameter and the running game in agreement, and the players' password unchanged.
+    #A backup carries the config of the server it was taken from, which holds that server's password.
+    #Copying it keeps the parameter and the running game in agreement.
     password = inherited or '%030x' % random.randrange(16**30)
     ssm.put_parameter(Name='game-password-' + serverId, Value=password, Type='SecureString', Overwrite=True)
-    return inherited is not None
+    return 'inherited' if inherited else 'new'
 
 
 def getServerOptions():
@@ -507,25 +513,34 @@ def getServerOptions():
             'defaultVolumeSizeGib': t['defaultVolumeSizeGib'],
         })
 
-    snapshots = []
+    #Backups are what a new server is created from, so there is nothing else to keep a world in. The
+    #volume's tags are on its snapshots, which is where the server and game come from.
+    backups = []
     try:
         response = ec2.describe_snapshots(OwnerIds=['self'], Filters=[
-            {'Name': 'tag:' + os.environ['managedTag'], 'Values': [os.environ['managedValue']]},
+            {'Name': 'tag:' + os.environ['backupTag'], 'Values': [os.environ['backupValue']]},
+            {'Name': 'status', 'Values': ['completed']},
         ])
+        #Only each server's newest backup starts a new server. The ones behind it exist to put a server
+        #back to an earlier point, which is a different thing to ask for.
+        newestSeen = set()
         for snap in sorted(response['Snapshots'], key=lambda x: x['StartTime'], reverse=True):
             tags = {t['Key']: t['Value'] for t in snap.get('Tags', [])}
-            snapshots.append({
+            server = tags.get('server-id') or snap['SnapshotId']
+            if server in newestSeen:
+                continue
+            newestSeen.add(server)
+            backups.append({
                 'snapshotId': snap['SnapshotId'],
                 'serverId': tags.get('server-id'),
                 'game': tags.get('game-name'),
                 'sizeGib': snap['VolumeSize'],
-                'state': snap['State'],
                 'startTime': snap['StartTime'].strftime('%Y-%m-%dT%H:%M:%SZ'),
             })
     except Exception as e:
-        print("Couldn't list archives: " + str(e))
+        print("Couldn't list backups: " + str(e))
 
-    return {'templates': options, 'snapshots': snapshots,
+    return {'templates': options, 'backups': backups,
             'instanceTypes': list(ALLOWED_INSTANCE_TYPES), 'maxServers': int(os.environ.get('maxServers') or '10')}
 
 
@@ -564,16 +579,25 @@ def createServer(event):
         return "Volume size must be at least 8 GiB"
 
     snapshotId = (event.get('snapshotId') or '').strip()
+    restoredFrom = None
+    if snapshotId:
+        restoredFrom = backupSnapshot(snapshotId)
+        if not restoredFrom:
+            return "That backup isn't available - it may have been deleted"
+        if restoredFrom.get('game') and restoredFrom['game'] != game:
+            return ("That backup holds a " + str(restoredFrom['game']) + " world, which a " +
+                    template['displayName'] + " server can't run")
 
     ami = ssm.get_parameter(Name=os.environ['amiParameter'])['Parameter']['Value']
 
-    #Created as part of the launch and kept when the instance goes, which is what keeps a world across
-    #a rebuild.
+    #The volume is made from the backup as the instance launches, so it is there when the installer
+    #looks for it. A world that outlives its server is kept as that server's backups.
     dataVolume = {'VolumeType': 'gp3', 'DeleteOnTermination': False}
-    if snapshotId:
+    if restoredFrom:
         dataVolume['SnapshotId'] = snapshotId
     else:
         dataVolume['VolumeSize'] = volumeSize
+    blockDeviceMappings = [{'DeviceName': DATA_DEVICE_NAME, 'Ebs': dataVolume}]
 
     #Replaced up front, so a marker left by a previous server of this id can't be read as this one's
     #outcome while it is still installing.
@@ -617,7 +641,18 @@ def createServer(event):
         tags.append({'Key': 'domain', 'Value': serverId + '.' + os.environ['hostedZoneName']})
         tags.append({'Key': 'hostedZoneId', 'Value': os.environ['hostedZoneId']})
 
-    inheritedPassword = ensureJoinPassword(serverId, inheritFrom=snapshotServerId(snapshotId))
+    #What gets backed up is the data volume, so the backup tag goes there and nowhere else. Its tags end
+    #up on the snapshots, which is how a backup still names its server once that server is gone. The
+    #root disk holds only what the install script can rebuild.
+    sharedTags = [t for t in tags if t['Key'] != 'Name']
+    dataTags = sharedTags + [
+        {'Key': 'Name', 'Value': 'game-server-' + serverId + '-data'},
+        {'Key': os.environ['backupTag'], 'Value': os.environ['backupValue']},
+    ]
+    rootTags = sharedTags + [{'Key': 'Name', 'Value': 'game-server-' + serverId + '-root'}]
+
+    passwordSource = ensureJoinPassword(serverId,
+                                        inheritFrom=(restoredFrom or {}).get('serverId'))
 
     response = ec2.run_instances(
         ImageId=ami,
@@ -628,57 +663,63 @@ def createServer(event):
         SecurityGroupIds=[template['securityGroupId']],
         IamInstanceProfile={'Arn': os.environ['instanceProfileArn']},
         UserData=userData,
-        BlockDeviceMappings=[{'DeviceName': '/dev/sdf', 'Ebs': dataVolume}],
-        #Only the instance is tagged here: tagging volumes at launch would tag the root disk too, and the
-        #backup plan selects on this tag.
+        BlockDeviceMappings=blockDeviceMappings,
+        #Only the instance is tagged here: tagging volumes at launch would tag the root disk too, which
+        #holds nothing the install script can't rebuild.
         TagSpecifications=[{'ResourceType': 'instance', 'Tags': tags}],
     )
     instanceId = response['Instances'][0]['InstanceId']
-    taggedVolume = None
-    try:
-        taggedVolume = tagDataVolume(instanceId, tags)
-    except Exception as e:
-        print("Couldn't tag the data volume of " + instanceId + ": " + str(e))
 
-    #A new instance has no public IP for a moment, so the DNS record is left to the state machine that
-    #already retries for one.
+    #A new instance has no address for a moment, so naming it is left to the state machine that waits.
     domain = next((t['Value'] for t in tags if t['Key'] == 'domain'), None)
     if domain:
+        execution = {
+            'instanceId': instanceId,
+            'domainName': domain,
+            'hostedZoneId': os.environ['hostedZoneId'],
+        }
         try:
-            updateDnsStateFunc({'Instances': [{
-                'hostedZoneId': os.environ['hostedZoneId'],
-                'DomainName': domain,
-                'InstanceId': instanceId,
-            }]})
+            startAfterLaunch(execution)
         except Exception as e:
-            print("Couldn't start the DNS update for " + instanceId + ": " + str(e))
+            print("Couldn't start the after-launch steps for " + instanceId + ": " + str(e))
+
+    taggedVolume = None
+    try:
+        taggedVolume = tagServerVolumes(instanceId, dataTags, rootTags)
+    except Exception as e:
+        print("Couldn't tag the volumes of " + instanceId + ": " + str(e))
 
     print("createServer: serverId=" + serverId + " game=" + game + " instanceId=" + instanceId)
     created = ("Created " + serverId + " (" + instanceId + ") - it installs " +
                template['displayName'] + " on first boot, which takes a few minutes")
     if not taggedVolume:
-        created += ". Its data volume couldn't be tagged, so backups won't cover it yet"
-    if snapshotId and not inheritedPassword:
-        created += (". Its join password couldn't be taken from the archive, so players keep the one the "
-                    "restored world already had rather than the one stored for " + serverId)
+        created += ". Its data volume couldn't be tagged, so it won't be backed up"
+    if restoredFrom and passwordSource == 'new':
+        created += (". Its join password couldn't be taken from the volume's own server, so players keep "
+                    "the one that world already had rather than the one stored for " + serverId)
     return created
 
 
-def tagDataVolume(instanceId, tags):
-    #The volume id exists as soon as the instance does, so this needs no wait - but the mapping can take
-    #a moment to appear in describe_instances.
-    for _ in range(10):
+def tagServerVolumes(instanceId, dataTags, rootTags):
+    #Both disks are named after the server and what they hold, so a volume on its own says where it
+    #belongs. The ids exist as soon as the instance does, but the mappings take a moment to appear.
+    #Waits for both, because they are attached a moment apart and the data volume is usually first.
+    for attempt in range(10):
         response = ec2.describe_instances(InstanceIds=[instanceId])
-        for mapping in response['Reservations'][0]['Instances'][0].get('BlockDeviceMappings', []):
-            if mapping.get('DeviceName') != '/dev/sdf':
-                continue
-            volumeId = (mapping.get('Ebs') or {}).get('VolumeId')
-            if volumeId:
-                ec2.create_tags(Resources=[volumeId], Tags=tags)
-                return volumeId
+        mappings = response['Reservations'][0]['Instances'][0].get('BlockDeviceMappings', [])
+        byDevice = {m.get('DeviceName'): (m.get('Ebs') or {}).get('VolumeId') for m in mappings}
+        dataVolumeId = byDevice.pop(DATA_DEVICE_NAME, None)
+        rootVolumeIds = [v for v in byDevice.values() if v]
+        if dataVolumeId and (rootVolumeIds or attempt == 9):
+            ec2.create_tags(Resources=[dataVolumeId], Tags=dataTags)
+            if rootVolumeIds:
+                ec2.create_tags(Resources=rootVolumeIds, Tags=rootTags)
+            else:
+                print("No root volume to name on " + instanceId)
+            return dataVolumeId
         time.sleep(1)
-    #The server still works; it is the backup plan that selects on these tags.
-    print("Couldn't tag the data volume of " + instanceId)
+    #The server still works; the tags are how its volume is found again once no server is using it.
+    print("Couldn't tag the volumes of " + instanceId)
     return None
 
 
@@ -690,52 +731,33 @@ def dataVolumeOf(instanceId):
     return None
 
 
-def snapshotServerId(snapshotId):
-    if not snapshotId:
-        return None
+def backupSnapshot(snapshotId):
     try:
-        snapshots = ec2.describe_snapshots(SnapshotIds=[snapshotId])['Snapshots']
+        snapshots = ec2.describe_snapshots(SnapshotIds=[snapshotId], Filters=[
+            {'Name': 'tag:' + os.environ['backupTag'], 'Values': [os.environ['backupValue']]},
+            {'Name': 'status', 'Values': ['completed']},
+        ])['Snapshots']
     except Exception as e:
-        print("Couldn't read archive " + str(snapshotId) + ": " + str(e))
+        print("Couldn't read backup " + str(snapshotId) + ": " + str(e))
         return None
-    for snap in snapshots:
-        for tag in snap.get('Tags', []):
-            if tag.get('Key') == 'server-id':
-                return tag.get('Value')
-    return None
+    if not snapshots:
+        return None
+    tags = {t['Key']: t['Value'] for t in snapshots[0].get('Tags', [])}
+    return {'snapshotId': snapshots[0]['SnapshotId'], 'serverId': tags.get('server-id'),
+            'game': tags.get('game-name'), 'sizeGib': snapshots[0]['VolumeSize']}
 
 
 def deleteServer(instance):
     instanceId = instance['InstanceId']
     serverId = instance.get('ServerId') or instance.get('GameName') or instanceId
-    gameName = instance.get('GameName')
 
-    #Snapshotted before the instance goes, so a decommissioned server can be restored from this
-    #snapshot later.
+    #The volume outlives the instance, but the server's backups are what a later server is created from.
     volumeId = dataVolumeOf(instanceId)
-    snapshotId = None
-    if volumeId:
-        snapshot = ec2.create_snapshot(
-            VolumeId=volumeId,
-            Description='Archive of game server ' + str(serverId),
-            TagSpecifications=[{'ResourceType': 'snapshot', 'Tags': [
-                {'Key': 'Name', 'Value': 'game-server-' + str(serverId) + '-archive'},
-                {'Key': 'server-id', 'Value': str(serverId)},
-                {'Key': 'game-name', 'Value': str(gameName)},
-                {'Key': os.environ['managedTag'], 'Value': os.environ['managedValue']},
-            ]}],
-        )
-        snapshotId = snapshot['SnapshotId']
-
     ec2.terminate_instances(InstanceIds=[instanceId])
-    print("deleteServer: instanceId=" + instanceId + " volumeId=" + str(volumeId) +
-          " snapshotId=" + str(snapshotId))
+    print("deleteServer: instanceId=" + instanceId + " volumeId=" + str(volumeId))
 
-    if snapshotId:
-        return ("Terminated " + str(serverId) + ". Archived to " + snapshotId +
-                " - create a server from it to bring this world back. Its volume " + str(volumeId) +
-                " is also kept.")
-    return "Terminated " + str(serverId) + " - no data volume was found to archive"
+    return ("Terminated " + str(serverId) +
+            " - create a server from its newest backup to bring this world back.")
 
 
 def getAccess(info):
@@ -909,25 +931,17 @@ def getInstallStatus(statusKey):
         return None
 
 
-def getLastBackupTime(gameName, serverId, volumeId):
+def getLastBackupTime(volumeId):
     #Every server shares one vault, so a recovery point is identified by the volume it was taken from -
     #asking by vault alone would report any server's backup as this one's.
-    #
-    #A server predating the server-id tag has its own per-game vault, named by convention.
-    if serverId:
-        vaultName = os.environ.get('backupVaultName')
-        if not vaultName or not volumeId:
-            return None
-        arguments = {
-            'BackupVaultName': vaultName,
-            'ByResourceArn': 'arn:aws:ec2:%s:%s:volume/%s' % (os.environ.get('AWS_REGION'), accountId, volumeId),
-        }
-    elif gameName:
-        arguments = {'BackupVaultName': 'game-server-' + gameName + '-cfn-backup-vault-daily'}
-    else:
+    vaultName = os.environ.get('backupVaultName')
+    if not vaultName or not volumeId:
         return None
     try:
-        points = backup.list_recovery_points_by_backup_vault(**arguments)['RecoveryPoints']
+        points = backup.list_recovery_points_by_backup_vault(
+            BackupVaultName=vaultName,
+            ByResourceArn='arn:aws:ec2:%s:%s:volume/%s' % (os.environ.get('AWS_REGION'), accountId, volumeId),
+        )['RecoveryPoints']
         completed = [p['CreationDate'] for p in points if p.get('Status') == 'COMPLETED']
         return max(completed).strftime('%Y-%m-%dT%H:%M:%SZ') if completed else None
     except Exception as e:
@@ -943,32 +957,20 @@ def getIdleShutdownStatus(tags):
     return 'triggered-once' if byKey.get('idle-check') == 'true' else 'enabled'
 
 def startBackupNow(instance):
-    region = os.environ.get('AWS_REGION')
+    #Handed to the backup Lambda so a backup asked for here expires the one it supersedes and prunes the
+    #rest exactly as a nightly one does.
     serverId = instance.get('ServerId')
-    gameName = instance.get('GameName')
+    if not serverId:
+        raise Exception("No server id on " + str(instance.get('InstanceId')))
 
-    if serverId:
-        volumeId = instance.get('DataVolumeId')
-        if not volumeId:
-            raise Exception("No data volume found for " + serverId)
-        vaultName = os.environ['backupVaultName']
-        roleArn = os.environ['backupRoleArn']
-    else:
-        #A server predating the server-id tag has one volume per game, and its own vault and role, both
-        #named by the convention its stack used.
-        volumes = ec2.describe_volumes(Filters=[{'Name': 'tag:game-name', 'Values': [gameName]}])['Volumes']
-        if not volumes:
-            raise Exception("No data volume found for " + str(gameName))
-        volumeId = volumes[0]['VolumeId']
-        vaultName = 'game-server-' + gameName + '-cfn-backup-vault-daily'
-        roleArn = ('arn:aws:iam::' + accountId +
-                   ':role/service-role/game-server-' + gameName + '-cfn-backup-role')
-
-    backup.start_backup_job(
-        BackupVaultName=vaultName,
-        ResourceArn='arn:aws:ec2:' + region + ':' + accountId + ':volume/' + volumeId,
-        IamRoleArn=roleArn,
+    response = boto3.client('lambda').invoke(
+        FunctionName=os.environ['backupLambdaName'],
+        InvocationType='RequestResponse',
+        Payload=json.dumps({'serverId': serverId, 'force': True}).encode(),
     )
+    result = json.loads(response['Payload'].read() or 'null')
+    if response.get('FunctionError'):
+        raise Exception(str(result))
 
 def startWorldDownload(instanceId, gameName, dataPath, includePaths, scope):
     #Only the folders includePaths names, never the whole data directory: Vintage Story's
@@ -1390,6 +1392,13 @@ def runSsmCommandSync(instanceId, commands):
             continue
         return result['Status'] == 'Success', result.get('StandardOutputContent', ''), result.get('StandardErrorContent', '')
     return False, '', 'Timed out waiting for the command to complete'
+
+def startAfterLaunch(execution):
+    boto3.client('stepfunctions').start_execution(
+        stateMachineArn=os.environ['stepfunctionarn'],
+        input=json.dumps(execution),
+    )
+
 
 def updateDnsStateFunc(info):
     stepfunction = boto3.client('stepfunctions')

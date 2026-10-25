@@ -39,7 +39,7 @@ function mcServerOptionsForm() {
     version: document.getElementById('mcNewServerVersion'),
     type: document.getElementById('mcNewServerType'),
     volume: document.getElementById('mcNewServerVolume'),
-    snapshot: document.getElementById('mcNewServerSnapshot'),
+    reuse: document.getElementById("mcNewServerReuse"),
     hint: document.getElementById('mcNewServerHint')
   };
 }
@@ -49,38 +49,38 @@ function mcSelectedTemplate() {
   return (mcServerOptions.templates || []).filter(function (t) { return t.game === f.game.value; })[0];
 }
 
-//A game version is only asked for where the install needs an exact one, and restoring a world makes the
-//disk size come from the archive instead.
+//A game version is only asked for where the install needs an exact one, and starting from a backup
+//makes the disk size come from that backup instead.
 function mcSyncNewServerForm() {
   var f = mcServerOptionsForm();
   var t = mcSelectedTemplate();
   if (!t) return;
-  mcRenderSnapshotOptions(t.game);
+  mcRenderBackupOptions(t.game);
   f.version.parentElement.style.display = t.requiresGameVersion ? '' : 'none';
-  f.volume.parentElement.style.display = f.snapshot.value ? 'none' : '';
+  f.volume.parentElement.style.display = f.reuse.value ? 'none' : '';
   //A hidden field can't be required: the browser refuses to submit and has nothing to point at.
   f.version.required = t.requiresGameVersion;
-  f.volume.required = !f.snapshot.value;
+  f.volume.required = !f.reuse.value;
   f.volume.placeholder = String(t.defaultVolumeSizeGib);
-  f.hint.textContent = f.snapshot.value
-    ? 'The new server starts from that archive, which is left untouched.'
+  f.hint.textContent = f.reuse.value
+    ? 'The new server starts from that backup. Whatever it came from is left alone.'
     : 'A name becomes the server\'s DNS record and cannot be changed later.';
 }
 
-//An archive restores onto one game's install, so only that game's are offered. One whose game can't be
-//told is offered everywhere rather than hidden.
-function mcRenderSnapshotOptions(game) {
+//A backup holds one game's world, so only that game's are offered. One whose game can't be told is
+//offered everywhere rather than hidden.
+function mcRenderBackupOptions(game) {
   var f = mcServerOptionsForm();
-  var previous = f.snapshot.value;
-  var usable = (mcServerOptions.snapshots || []).filter(function (s) {
-    return s.state === 'completed' && (!s.game || s.game === game);
+  var previous = f.reuse.value;
+  var usable = (mcServerOptions.backups || []).filter(function (b) {
+    return !b.game || b.game === game;
   });
-  f.snapshot.innerHTML = '<option value="">Nothing - a fresh world</option>' +
-    usable.map(function (s) {
-      return '<option value="' + s.snapshotId + '">' + escapeHtml(s.serverId || s.snapshotId) +
-        ' - ' + mcRelativeTimeText(s.startTime) + '</option>';
+  f.reuse.innerHTML = '<option value="">Nothing - a fresh world</option>' +
+    usable.map(function (b) {
+      return '<option value="' + b.snapshotId + '">' + escapeHtml(b.serverId || b.snapshotId) +
+        ' - ' + mcRelativeTimeText(b.startTime) + '</option>';
     }).join('');
-  f.snapshot.value = usable.some(function (s) { return s.snapshotId === previous; }) ? previous : '';
+  f.reuse.value = usable.some(function (b) { return b.snapshotId === previous; }) ? previous : '';
 }
 
 function renderNewServerForm() {
@@ -92,7 +92,7 @@ function renderNewServerForm() {
     return '<option value="' + x + '"' + (x === 't3a.medium' ? ' selected' : '') + '>' + x + '</option>';
   }).join('');
   f.game.onchange = mcSyncNewServerForm;
-  f.snapshot.onchange = mcSyncNewServerForm;
+  f.reuse.onchange = mcSyncNewServerForm;
   mcSyncNewServerForm();
 }
 
@@ -128,13 +128,13 @@ async function createServer() {
       '&serverid=' + encodeURIComponent(f.id.value) +
       '&instancetype=' + encodeURIComponent(f.type.value) +
       '&gameversion=' + encodeURIComponent(f.version.value) +
-      '&volumesize=' + encodeURIComponent(f.snapshot.value ? '' : f.volume.value) +
-      '&snapshotid=' + encodeURIComponent(f.snapshot.value), {
+      '&volumesize=' + encodeURIComponent(f.reuse.value ? '' : f.volume.value) +
+      '&snapshotid=' + encodeURIComponent(f.reuse.value), {
       method: 'get', headers: new Headers({ 'Authorization': jwt })
     });
     var msgdata = await response.json();
     showAlert(msgdata[0]);
-    //Reloaded so the next form offers the archive this may have produced.
+    //Reloaded so the next form offers the backup this may have produced.
     mcForgetServerOptions();
     toggleNewServerForm(false);
     f.id.value = '';
@@ -147,8 +147,7 @@ async function createServer() {
 }
 
 async function deleteServer(instanceId, label) {
-  if (!confirm('Delete ' + label + '?\n\nIts world is archived to a snapshot first, and its disk is kept, ' +
-               'so the server can be recreated from either.')) return;
+  if (!confirm('Delete ' + label + '?\n\nIts backups are kept, so the server can be recreated from one.')) return;
   var jwt = await getJwt();
   try {
     const response = await fetch(API_URL + 'deleteserver/' + query_string + '&instanceid=' + instanceId, {

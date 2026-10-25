@@ -33,8 +33,14 @@ const localConfigFile = ".env"
 // FLEET_STACK_NAME=game-server-fleet-cfn
 // PUBLISHER_STACK_NAME=GameServerAssetPublisher
 // MAX_SERVERS=10
+// KEEP_BACKUPS_PER_SERVER=5
+// SUPERSEDED_BACKUP_DAYS=30
 // ID_TAG_NAME=game-server-finder
 // ID_TAG_VALUE=game-server
+
+// dataDeviceName is where a server's data volume attaches. The install scripts find the volume by
+// looking for the one disk that isn't the root, so this only has to be free.
+const dataDeviceName = "/dev/sdf"
 
 type Config struct {
 	AwsAccount string
@@ -47,6 +53,15 @@ type Config struct {
 	// server not carrying it is left alone by both.
 	ManagedTag   string
 	ManagedValue string
+	// The tag marking what the backup Lambda protects. A server's data volume carries it and nothing
+	// else does, so the Lambda finds its volumes by it.
+	BackupTag   string
+	BackupValue string
+	// How many backups of each server to keep.
+	KeepBackupsPerServer int
+	// How long a backup lives once a newer one supersedes it. Only the newest is kept indefinitely, so
+	// a deleted server keeps one world and lets the rest run out.
+	SupersededBackupDays int
 
 	PublisherStackName string
 	// AmiParameter is the public SSM parameter holding the AMI a new server launches from.
@@ -68,6 +83,7 @@ type Config struct {
 	ControlLambdaAssetDir string
 	UpdateDnsAssetDir     string
 	IdleShutdownAssetDir  string
+	BackupLambdaAssetDir  string
 }
 
 func LoadConfig() (Config, error) {
@@ -85,8 +101,12 @@ func LoadConfig() (Config, error) {
 		//Must match the game-server-*-cfn pattern the deploy role is scoped to.
 		FleetStackName: stringEnv("FLEET_STACK_NAME", "game-server-fleet-cfn"),
 
-		ManagedTag:   stringEnv("MANAGED_TAG", "managed-by"),
-		ManagedValue: stringEnv("MANAGED_VALUE", "control-panel"),
+		ManagedTag:           stringEnv("MANAGED_TAG", "managed-by"),
+		ManagedValue:         stringEnv("MANAGED_VALUE", "control-panel"),
+		BackupTag:            stringEnv("BACKUP_TAG", "backup"),
+		BackupValue:          stringEnv("BACKUP_VALUE", "daily"),
+		KeepBackupsPerServer: intEnv("KEEP_BACKUPS_PER_SERVER", 5),
+		SupersededBackupDays: intEnv("SUPERSEDED_BACKUP_DAYS", 30),
 
 		PublisherStackName: stringEnv("PUBLISHER_STACK_NAME", "GameServerAssetPublisher"),
 		AmiParameter: stringEnv("AMI_PARAMETER",
@@ -107,6 +127,7 @@ func LoadConfig() (Config, error) {
 		ControlLambdaAssetDir: "../build/lambda/control",
 		UpdateDnsAssetDir:     "../build/lambda/update-dns",
 		IdleShutdownAssetDir:  "../build/lambda/idle-shutdown",
+		BackupLambdaAssetDir:  "../build/lambda/backup-servers",
 	}
 
 	if config.FrontEndDomain != "" {
