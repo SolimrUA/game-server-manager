@@ -46,7 +46,7 @@ func NewFleetStack(scope constructs.Construct, id string, props *FleetStackProps
 	})
 
 	profile := addServerRole(stack, statusBucketName)
-	groups := addSecurityGroups(stack, vpc)
+	groups := addSecurityGroups(stack, vpc, config)
 	vault, backupRole := addBackups(stack, config)
 	backupLambda := addServerBackups(stack, config, statusBucketName, vault, backupRole)
 	addIdleShutdown(stack, config, statusBucketName)
@@ -91,7 +91,7 @@ func addServerRole(stack awscdk.Stack, statusBucketName *string) awsiam.Instance
 }
 
 // addSecurityGroups gives each game its own group for its ports. Servers of the same game share one.
-func addSecurityGroups(stack awscdk.Stack, vpc awsec2.IVpc) map[string]*string {
+func addSecurityGroups(stack awscdk.Stack, vpc awsec2.IVpc, config Config) map[string]*string {
 	ids := map[string]*string{}
 	for _, template := range GameTemplates {
 		group := awsec2.NewSecurityGroup(stack, jsii.String("SecurityGroup"+template.Game), &awsec2.SecurityGroupProps{
@@ -108,6 +108,12 @@ func addSecurityGroups(stack awscdk.Stack, vpc awsec2.IVpc) map[string]*string {
 			group.AddIngressRule(awsec2.Peer_AnyIpv4(),
 				awsec2.Port_UdpRange(jsii.Number(p.From), jsii.Number(p.To)),
 				jsii.String(template.DisplayName+" UDP"), jsii.Bool(false))
+		}
+		// Only the prefix list reaches SSH, so a server is administered through EC2 Instance Connect
+		// rather than from anywhere that can route to it.
+		if config.SshPrefixList != "" {
+			group.AddIngressRule(awsec2.Peer_PrefixList(jsii.String(config.SshPrefixList)),
+				awsec2.Port_SSH(), jsii.String("EC2 Instance Connect"), jsii.Bool(false))
 		}
 		ids[template.Game] = group.SecurityGroupId()
 	}

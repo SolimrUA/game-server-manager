@@ -28,6 +28,10 @@ const localConfigFile = ".env"
 // COGNITO_USER_POOL_ID=eu-central-1_xxxxxxxxx
 // COGNITO_DOMAIN_PREFIX=xxxxxxxxxxxxxx
 //
+// The prefix list allowed to reach port 22 on every server, for EC2 Instance Connect. Left blank,
+// no server accepts SSH from anywhere.
+// SSH_PREFIX_LIST=pl-00000000000000000
+//
 // Optional.
 // CONTROL_PANEL_STACK_NAME=game-server-controlpanel-cdk
 // FLEET_STACK_NAME=game-server-fleet-cfn
@@ -73,6 +77,10 @@ type Config struct {
 	HostedZoneId   string
 	HostedZoneName string
 
+	// SshPrefixList is the managed prefix list allowed to reach port 22 on every server. Empty leaves
+	// SSH closed.
+	SshPrefixList string
+
 	UserPoolId          string
 	CognitoDomainPrefix string
 	CertificateArn      string
@@ -112,6 +120,8 @@ func LoadConfig() (Config, error) {
 		AmiParameter: stringEnv("AMI_PARAMETER",
 			"/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"),
 		MaxServers: intEnv("MAX_SERVERS", 10),
+
+		SshPrefixList: stringEnv("SSH_PREFIX_LIST", ""),
 
 		FrontEndDomain: stringEnv("FRONTEND_DOMAIN", ""),
 		HostedZoneId:   stringEnv("HOSTED_ZONE_ID", ""),
