@@ -139,6 +139,10 @@ while i < len(lines):
             out.append(indent + "MODS=" + new_entries[0] + "\n")
             for e in new_entries[1:]:
                 out.append(indent + e + "\n")
+        elif out and out[-1].strip() == "- |":
+            #The entries are gone, so the block scalar introducing them goes too: an empty block
+            #scalar is an empty environment entry, and the container will not start with one.
+            out.pop()
         i = j
         continue
     out.append(line)

@@ -105,7 +105,7 @@ services:
   valheim:
     image: mbround18/valheim:latest
     #The game saves the world on SIGINT, not on Docker's default SIGTERM, and 10s is too short for that
-    #save plus AUTO_BACKUP_ON_SHUTDOWN's archive. Without both, `docker compose down` kills it unsaved.
+    #save. Without both, `docker compose down` kills it unsaved.
     stop_signal: SIGINT
     stop_grace_period: 60s
     ports:
@@ -121,16 +121,14 @@ services:
       - PUBLIC=1
       - AUTO_UPDATE=1
       - AUTO_UPDATE_SCHEDULE=0 1 * * *
-      - AUTO_BACKUP=1
-      - AUTO_BACKUP_SCHEDULE=*/15 * * * *
-      - AUTO_BACKUP_REMOVE_OLD=1
-      - AUTO_BACKUP_DAYS_TO_LIVE=3
-      - AUTO_BACKUP_ON_UPDATE=1
-      - AUTO_BACKUP_ON_SHUTDOWN=1
+      #Off: Odin writes its archives to this same volume, which they fill, and its cleanup only runs
+      #while the server is up. The volume's EBS snapshots are the backups.
+      - AUTO_BACKUP=0
+      - AUTO_BACKUP_ON_UPDATE=0
+      - AUTO_BACKUP_ON_SHUTDOWN=0
     volumes:
       - ./saves:/home/steam/.config/unity3d/IronGate/Valheim
       - ./server:/home/steam/valheim
-      - ./backups:/home/steam/backups
 COMPOSE_EOF
 fi
 
