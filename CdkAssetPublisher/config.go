@@ -20,7 +20,7 @@ const localConfigFile = ".env"
 // ASSET_KEY_PREFIX=personal-game-server-manager/v1
 //
 // Optional. The Control Panel stack whose outputs fill js/config.js.
-// CONTROL_PANEL_STACK_NAME=game-server-controlpanel-cfn
+// CONTROL_PANEL_STACK_NAME=game-server-controlpanel-cdk
 //
 // Optional path overrides, relative to CdkAssetPublisher/.
 // LOCAL_ASSET_BUILD_DIR=../build/assets
@@ -40,7 +40,6 @@ type Config struct {
 
 	LocalAssetBuildDir        string
 	LocalControlPanelBuildDir string
-	LocalLambdaBuildDir       string
 	LocalScriptsBuildDir      string
 }
 
@@ -56,13 +55,12 @@ func LoadConfig() (Config, error) {
 		CreateAssetBucket: boolEnv("CREATE_ASSET_BUCKET", true),
 		AssetKeyPrefix:    stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
 
-		ControlPanelStackName: stringEnv("CONTROL_PANEL_STACK_NAME", "game-server-controlpanel-cfn"),
+		ControlPanelStackName: stringEnv("CONTROL_PANEL_STACK_NAME", "game-server-controlpanel-cdk"),
 
 		LocalAssetBuildDir:        stringEnv("LOCAL_ASSET_BUILD_DIR", "../build/assets"),
 		LocalControlPanelBuildDir: stringEnv("LOCAL_CONTROL_PANEL_BUILD_DIR", "../build/controlpanel"),
 	}
 
-	config.LocalLambdaBuildDir = stringEnv("LOCAL_LAMBDA_BUILD_DIR", config.LocalAssetBuildDir+"/Lambda")
 	config.LocalScriptsBuildDir = stringEnv("LOCAL_SCRIPTS_BUILD_DIR", config.LocalAssetBuildDir+"/scripts")
 
 	if err := validateConfig(config); err != nil {
@@ -84,36 +82,47 @@ func loadEnvFile(path string) error {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		key, value, err := envAssignment(scanner.Text())
+		if err != nil {
+			return err
+		}
+		if key == "" {
 			continue
 		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return fmt.Errorf("invalid config line %q; expected KEY=value", line)
+		if _, alreadySet := os.LookupEnv(key); alreadySet {
+			continue
 		}
-
-		key = strings.TrimSpace(key)
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
-		if key == "" {
-			return fmt.Errorf("invalid config line %q; key is empty", line)
-		}
-
-		if _, exists := os.LookupEnv(key); !exists {
-			if err := os.Setenv(key, value); err != nil {
-				return err
-			}
+		if err := os.Setenv(key, value); err != nil {
+			return err
 		}
 	}
 
 	return scanner.Err()
 }
 
+// envAssignment reads one KEY=value line of the config file. A blank line or a comment is not an
+// assignment, and comes back with an empty key.
+func envAssignment(text string) (string, string, error) {
+	line := strings.TrimSpace(text)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", nil
+	}
+
+	key, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return "", "", fmt.Errorf("invalid config line %q; expected KEY=value", line)
+	}
+
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", "", fmt.Errorf("invalid config line %q; key is empty", line)
+	}
+	return key, strings.Trim(strings.TrimSpace(value), `"'`), nil
+}
+
 func validateConfig(config Config) error {
 	for label, path := range map[string]string{
 		"LOCAL_ASSET_BUILD_DIR":         config.LocalAssetBuildDir,
-		"LOCAL_LAMBDA_BUILD_DIR":        config.LocalLambdaBuildDir,
 		"LOCAL_SCRIPTS_BUILD_DIR":       config.LocalScriptsBuildDir,
 		"LOCAL_CONTROL_PANEL_BUILD_DIR": config.LocalControlPanelBuildDir,
 	} {

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -24,7 +22,6 @@ import (
 type AssetPublisherStackProps struct {
 	awscdk.StackProps
 	Config       Config
-	LambdaKeys   LambdaKeys
 	ScriptHashes ScriptHashes
 	ControlPanel *ControlPanelDeployment
 }
@@ -36,13 +33,6 @@ type ControlPanelDeployment struct {
 	DistributionId  string
 	ControlPanelUrl string
 	SourceDir       string
-}
-
-// LambdaKeys holds the content-addressed S3 keys (relative to AssetKeyPrefix) that each Lambda zip was
-// published under - see zipLambdaContentAddressed for why these need to change whenever the code does.
-type LambdaKeys struct {
-	StartStopLambdaKey string
-	UpdateDnsLambdaKey string
 }
 
 // ScriptHashes holds full SHA256 hex digests of the game scripts that get fetched-and-executed on an
@@ -58,13 +48,11 @@ type ScriptHashes struct {
 func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetPublisherStackProps) awscdk.Stack {
 	var stackProps awscdk.StackProps
 	var config Config
-	var lambdaKeys LambdaKeys
 	var scriptHashes ScriptHashes
 	var controlPanel *ControlPanelDeployment
 	if props != nil {
 		stackProps = props.StackProps
 		config = props.Config
-		lambdaKeys = props.LambdaKeys
 		scriptHashes = props.ScriptHashes
 		controlPanel = props.ControlPanel
 	}
@@ -132,12 +120,6 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	awscdk.NewCfnOutput(stack, jsii.String("ScriptsBaseUrl"), &awscdk.CfnOutputProps{
 		Value: jsii.String(fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s/scripts", config.AssetBucketName, config.AwsRegion, strings.Trim(config.AssetKeyPrefix, "/"))),
 	})
-	awscdk.NewCfnOutput(stack, jsii.String("StartStopLambdaKey"), &awscdk.CfnOutputProps{
-		Value: jsii.String(lambdaKeys.StartStopLambdaKey),
-	})
-	awscdk.NewCfnOutput(stack, jsii.String("UpdateDnsLambdaKey"), &awscdk.CfnOutputProps{
-		Value: jsii.String(lambdaKeys.UpdateDnsLambdaKey),
-	})
 	awscdk.NewCfnOutput(stack, jsii.String("ValheimInstallSha256"), &awscdk.CfnOutputProps{
 		Value: jsii.String(scriptHashes.ValheimInstallSha256),
 	})
@@ -157,7 +139,7 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 func main() {
 	config, err := LoadConfig()
 	must(err)
-	lambdaKeys, scriptHashes, err := prepareAssets(config)
+	scriptHashes, err := prepareAssets(config)
 	must(err)
 
 	controlPanel, err := prepareControlPanel(config)
@@ -169,7 +151,6 @@ func main() {
 			Env: env(config),
 		},
 		Config:       config,
-		LambdaKeys:   lambdaKeys,
 		ScriptHashes: scriptHashes,
 		ControlPanel: controlPanel,
 	})
@@ -185,8 +166,9 @@ func prepareControlPanel(config Config) (*ControlPanelDeployment, error) {
 		return nil, err
 	}
 	if !found {
-		fmt.Printf("Skipping the control panel: couldn't read outputs from stack %q. "+
-			"Deploy the Control Panel first, then run this again.\n", config.ControlPanelStackName)
+		fmt.Printf("NOT PUBLISHING THE CONTROL PANEL: couldn't read outputs from stack %q, so the "+
+			"site stays exactly as it is. Deploy that stack first, or set CONTROL_PANEL_STACK_NAME "+
+			"to the one that exists, then run this again.\n", config.ControlPanelStackName)
 		return nil, nil
 	}
 
@@ -210,48 +192,38 @@ func env(config Config) *awscdk.Environment {
 	}
 }
 
-func prepareAssets(config Config) (LambdaKeys, ScriptHashes, error) {
+func prepareAssets(config Config) (ScriptHashes, error) {
 	if err := os.RemoveAll(config.LocalAssetBuildDir); err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
+		return ScriptHashes{}, err
 	}
 
 	if err := copyDir("../scripts", config.LocalScriptsBuildDir); err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
-	}
-
-	startStopKey, err := zipLambdaContentAddressed(config, "../Lambda/gaming_server_start_stop-v1_0.py", "gaming_server_start_stop-v1_0")
-	if err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
-	}
-	updateDnsKey, err := zipLambdaContentAddressed(config, "../Lambda/update-dns-v1_0.py", "update-dns-v1_0")
-	if err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
+		return ScriptHashes{}, err
 	}
 
 	valheimInstallHash, err := sha256File("../scripts/Valheim/install.sh")
 	if err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
+		return ScriptHashes{}, err
 	}
 	valheimStatusAgentHash, err := sha256File("../scripts/Valheim/status_agent.py")
 	if err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
+		return ScriptHashes{}, err
 	}
 	vsInstallHash, err := sha256File("../scripts/VintageStory/install.sh")
 	if err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
+		return ScriptHashes{}, err
 	}
 	vsStatusAgentHash, err := sha256File("../scripts/VintageStory/status_agent.py")
 	if err != nil {
-		return LambdaKeys{}, ScriptHashes{}, err
+		return ScriptHashes{}, err
 	}
 
-	return LambdaKeys{StartStopLambdaKey: startStopKey, UpdateDnsLambdaKey: updateDnsKey},
-		ScriptHashes{
-			ValheimInstallSha256:          valheimInstallHash,
-			ValheimStatusAgentSha256:      valheimStatusAgentHash,
-			VintageStoryInstallSha256:     vsInstallHash,
-			VintageStoryStatusAgentSha256: vsStatusAgentHash,
-		}, nil
+	return ScriptHashes{
+		ValheimInstallSha256:          valheimInstallHash,
+		ValheimStatusAgentSha256:      valheimStatusAgentHash,
+		VintageStoryInstallSha256:     vsInstallHash,
+		VintageStoryStatusAgentSha256: vsStatusAgentHash,
+	}, nil
 }
 
 // sha256File returns the full lowercase-hex SHA256 digest of a file's contents, in the same format
@@ -318,48 +290,6 @@ func copyFile(source, destination string) error {
 
 	_, err = io.Copy(output, input)
 	return err
-}
-
-// zipLambdaContentAddressed zips source into config.LocalLambdaBuildDir under a name that includes a hash
-// of its content, and returns the resulting key relative to AssetKeyPrefix (e.g. "Lambda/foo.deadbeef.zip").
-//
-// This matters because AWS::Lambda::Function only re-fetches code from S3 when the Code.S3Key VALUE itself
-// changes in the CloudFormation template - it has no way to know the object AT an unchanged key was
-// overwritten with different bytes, so a fixed filename would let code fixes silently fail to deploy.
-func zipLambdaContentAddressed(config Config, source, baseName string) (string, error) {
-	var buf bytes.Buffer
-	archive := zip.NewWriter(&buf)
-
-	writer, err := archive.Create("lambda_function.py")
-	if err != nil {
-		return "", err
-	}
-
-	input, err := os.Open(source)
-	if err != nil {
-		return "", err
-	}
-	defer input.Close()
-
-	if _, err := io.Copy(writer, input); err != nil {
-		return "", err
-	}
-	if err := archive.Close(); err != nil {
-		return "", err
-	}
-
-	hash := sha256.Sum256(buf.Bytes())
-	fileName := fmt.Sprintf("%s.%x.zip", baseName, hash[:6])
-	destination := filepath.Join(config.LocalLambdaBuildDir, fileName)
-
-	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(destination, buf.Bytes(), 0644); err != nil {
-		return "", err
-	}
-
-	return "Lambda/" + fileName, nil
 }
 
 func must(err error) {

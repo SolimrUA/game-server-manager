@@ -20,7 +20,7 @@ behind it.
 Four stacks, none of which contains a game server:
 
 - **Common** ([`cfn/common-infra.yaml`](cfn/common-infra.yaml)) - shared VPC/networking and the shared server-status S3 bucket. Deploy once per account+region.
-- **Asset Publisher** ([`CdkAssetPublisher/`](CdkAssetPublisher/)) - uploads your local game scripts, Lambda code and web site to a bucket you own.
+- **Asset Publisher** ([`CdkAssetPublisher/`](CdkAssetPublisher/)) - uploads your local game scripts and web site to a bucket you own.
 - **Fleet** ([`cdk/fleet.go`](cdk/fleet.go)) - what every server shares: the instance role, one Security Group per game, one backup plan, and the schedule that stops idle servers.
 - **Control Panel** ([`cdk/controlpanel.go`](cdk/controlpanel.go)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront site.
 
@@ -37,7 +37,7 @@ The control panel finds the servers it manages by an EC2 tag (`ID_TAG_NAME`/`ID_
 
 ## Deploying
 
-None of these stacks fetch anything from the public internet at deploy time. The game install scripts, Lambda code, and web site files all come from an S3 bucket you control, published by `CdkAssetPublisher/`, so every install runs a version of the script you reviewed and pinned rather than whatever is on `main`.
+None of these stacks fetch anything from the public internet at deploy time. The game install scripts and web site files come from an S3 bucket you control, published by `CdkAssetPublisher/`, and the Lambdas are compiled from this repository at deploy time - so every install runs a version you reviewed and pinned rather than whatever is on `main`.
 
 Each new server also verifies a script against a SHA256 hash the Fleet stack pinned at deploy time before executing it, so even write access to that bucket can't get anything executed that you didn't approve.
 
@@ -53,10 +53,8 @@ aws cloudformation deploy \
 
 ### 2. Publish your assets - once per account+region
 
-`CdkAssetPublisher/` is a small Go CDK app that uploads your **local** copy of the game install scripts and Lambda code to your own S3 bucket:
-
-- all files under `scripts/` (one install script per game)
-- zipped Lambda packages from `Lambda/*.py`
+`CdkAssetPublisher/` is a small Go CDK app that uploads your **local** copy of the game install scripts - all files
+under `scripts/`, one per game - to your own S3 bucket.
 
 It also publishes the web site, but straight to the bucket CloudFront serves rather than to the assets bucket - see [step 4](#4-publish-the-web-site). On a first install there is no Control Panel yet, so it says it is skipping the web site and carries on.
 
