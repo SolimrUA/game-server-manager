@@ -211,8 +211,8 @@ func addServerBackups(stack awscdk.Stack, config Config, statusBucketName *strin
 // pause tag is skipped.
 func addIdleShutdown(stack awscdk.Stack, config Config, statusBucketName *string) {
 	fn := awslambda.NewFunction(stack, jsii.String("IdleShutdownLambda"), &awslambda.FunctionProps{
-		Runtime:     awslambda.Runtime_PYTHON_3_12(),
-		Handler:     jsii.String("lambda_function.lambda_handler"),
+		Runtime:     awslambda.Runtime_PROVIDED_AL2023(),
+		Handler:     jsii.String("bootstrap"),
 		Code:        awslambda.Code_FromAsset(jsii.String(config.IdleShutdownAssetDir), nil),
 		MemorySize:  jsii.Number(128),
 		Timeout:     awscdk.Duration_Seconds(jsii.Number(30)),

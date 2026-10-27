@@ -150,26 +150,32 @@ func (h *handler) servers(ctx context.Context) ([]server, error) {
 			return nil, fmt.Errorf("listing server volumes: %w", err)
 		}
 		for _, volume := range page.Volumes {
-			s := server{VolumeID: aws.ToString(volume.VolumeId)}
-			for _, tag := range volume.Tags {
-				if aws.ToString(tag.Key) == "server-id" {
-					s.ServerID = aws.ToString(tag.Value)
-				}
-			}
-			//The volume keeps changing only while a server is running on it, so that server's start
-			//time is one of the two things that says whether this world has moved on.
-			for _, attachment := range volume.Attachments {
-				launched, err := h.instanceLaunchTime(ctx, aws.ToString(attachment.InstanceId))
-				if err != nil {
-					log.Printf("%s: %v", s.ServerID, err)
-					continue
-				}
-				s.LaunchTime = launched
-			}
-			found = append(found, s)
+			found = append(found, h.serverOn(ctx, volume))
 		}
 	}
 	return found, nil
+}
+
+// serverOn describes the server a data volume belongs to.
+func (h *handler) serverOn(ctx context.Context, volume ec2types.Volume) server {
+	s := server{VolumeID: aws.ToString(volume.VolumeId)}
+	for _, tag := range volume.Tags {
+		if aws.ToString(tag.Key) == "server-id" {
+			s.ServerID = aws.ToString(tag.Value)
+		}
+	}
+
+	//The volume keeps changing only while a server is running on it, so that server's start time is
+	//one of the two things that says whether this world has moved on.
+	for _, attachment := range volume.Attachments {
+		launched, err := h.instanceLaunchTime(ctx, aws.ToString(attachment.InstanceId))
+		if err != nil {
+			log.Printf("%s: %v", s.ServerID, err)
+			continue
+		}
+		s.LaunchTime = launched
+	}
+	return s
 }
 
 func (h *handler) instanceLaunchTime(ctx context.Context, instanceID string) (time.Time, error) {

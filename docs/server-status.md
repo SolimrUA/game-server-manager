@@ -35,11 +35,10 @@ sudo -u vintagestory /home/vintagestory/server/server.sh command "announce Resta
 
 ## Who reads it
 
-The Control Panel's `getinfo` Lambda (`Lambda/gaming_server_start_stop-v1_0.py`) reads the object for each running
-instance (using the instance's `game-name` tag to build the key) and merges it into the `getinfo` API response as
-`GameStatus`. The front-end (`FrontEnd/js/index.js`) reads `GameStatus` straight off that response - it never talks
-to S3 directly. One field, `serverName`, is also promoted to a top-level `ServerName` on the instance object,
-where the front-end's Server Name column expects it.
+The Control Panel's `getinfo` Lambda (`Lambda/go/control/`) reads the object for each running instance, keyed on
+the instance's `server-id` tag, and merges it into the `getinfo` API response as `GameStatus`. The front-end
+(`FrontEnd/js/index.js`) reads `GameStatus` straight off that response - it never talks to S3 directly. One field,
+`serverName`, is also promoted to a top-level `ServerName`, which the Access page uses to label a server.
 
 ## Schema
 

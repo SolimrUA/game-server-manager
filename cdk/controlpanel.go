@@ -66,16 +66,18 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 	})
 
 	// --- who may do what, per user per server -------------------------------
+	// Keyed on the server id: a server rebuilt under the same id is the same server to the people
+	// playing on it, and keeps the access they were given.
 	accessTable := awsdynamodb.NewTable(stack, jsii.String("AccessTable"), &awsdynamodb.TableProps{
 		PartitionKey:  &awsdynamodb.Attribute{Name: jsii.String("userSub"), Type: awsdynamodb.AttributeType_STRING},
-		SortKey:       &awsdynamodb.Attribute{Name: jsii.String("instanceId"), Type: awsdynamodb.AttributeType_STRING},
+		SortKey:       &awsdynamodb.Attribute{Name: jsii.String("serverId"), Type: awsdynamodb.AttributeType_STRING},
 		BillingMode:   awsdynamodb.BillingMode_PAY_PER_REQUEST,
 		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
 	})
 
 	updateDns := awslambda.NewFunction(stack, jsii.String("UpdateDnsLambda"), &awslambda.FunctionProps{
-		Runtime:     awslambda.Runtime_PYTHON_3_12(),
-		Handler:     jsii.String("lambda_function.lambda_handler"),
+		Runtime:     awslambda.Runtime_PROVIDED_AL2023(),
+		Handler:     jsii.String("bootstrap"),
 		Code:        awslambda.Code_FromAsset(jsii.String(config.UpdateDnsAssetDir), nil),
 		MemorySize:  jsii.Number(128),
 		Timeout:     awscdk.Duration_Seconds(jsii.Number(10)),
@@ -97,7 +99,7 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 		PayloadResponseOnly: jsii.Bool(true),
 	})
 	dnsTask.AddRetry(&awsstepfunctions.RetryProps{
-		Errors:      jsii.Strings("noIpFound"),
+		Errors:      jsii.Strings("NoAddressYet"),
 		Interval:    awscdk.Duration_Seconds(jsii.Number(3)),
 		MaxAttempts: jsii.Number(10),
 		BackoffRate: jsii.Number(1),
@@ -122,8 +124,8 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 	statusBucketName := awscdk.Fn_ImportValue(jsii.String("common-infra-status-bucket-name"))
 
 	controlLambda := awslambda.NewFunction(stack, jsii.String("ControlLambda"), &awslambda.FunctionProps{
-		Runtime:    awslambda.Runtime_PYTHON_3_12(),
-		Handler:    jsii.String("lambda_function.lambda_handler"),
+		Runtime:    awslambda.Runtime_PROVIDED_AL2023(),
+		Handler:    jsii.String("bootstrap"),
 		Code:       awslambda.Code_FromAsset(jsii.String(config.ControlLambdaAssetDir), nil),
 		MemorySize: jsii.Number(128),
 		// installMod and deleteMod wait on an SSM command; this stays under the API's own 15s integration
@@ -156,6 +158,7 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 			"maxServers":         jsii.String(fmt.Sprintf("%d", config.MaxServers)),
 			"backupVaultName":    fleet.BackupVaultName,
 			"backupLambdaName":   fleet.BackupLambda.FunctionName(),
+			"accountId":          stack.Account(),
 		},
 	})
 

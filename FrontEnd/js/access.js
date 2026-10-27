@@ -8,23 +8,23 @@ var MC_TEMPLATE_LABELS = { player: 'Player', owner: 'Owner' };
 
 var mcAccessUsers = [];
 var mcAccessServers = [];
-//Saved state as it came back from getAccess, keyed "<userSub>|<instanceId>", against which edits are
+//Saved state as it came back from getAccess, keyed "<userSub>|<serverId>", against which edits are
 //diffed - so Save sends only what actually changed and Revert needs no reload.
 var mcAccessSaved = {};
 var mcAccessEdited = {};
 var mcAccessNames = {};
 
-function mcAccessKey(userSub, instanceId) {
-  return userSub + '|' + instanceId;
+function mcAccessKey(userSub, serverId) {
+  return userSub + '|' + serverId;
 }
 
-function mcAccessRole(userSub, instanceId) {
-  var key = mcAccessKey(userSub, instanceId);
+function mcAccessRole(userSub, serverId) {
+  var key = mcAccessKey(userSub, serverId);
   return mcAccessEdited.hasOwnProperty(key) ? mcAccessEdited[key] : (mcAccessSaved[key] || '');
 }
 
-function mcAccessIsDirty(userSub, instanceId) {
-  var key = mcAccessKey(userSub, instanceId);
+function mcAccessIsDirty(userSub, serverId) {
+  var key = mcAccessKey(userSub, serverId);
   return mcAccessEdited.hasOwnProperty(key) && mcAccessEdited[key] !== (mcAccessSaved[key] || '');
 }
 
@@ -54,7 +54,7 @@ function mcAccessPendingChanges() {
     var user = mcAccessUsers.filter(function (u) { return u.sub === parts[0]; })[0];
     changes.push({
       userSub: parts[0],
-      instanceId: parts[1],
+      serverId: parts[1],
       role: mcAccessEdited[key] || null,
       //Stored alongside the grant so the table is readable on its own in the console.
       email: user ? user.email : null
@@ -82,15 +82,15 @@ function mcAccessCellHtml(user, server) {
   if (user.isAdmin) {
     return '<td class="mcAccessCell mcAccessAdminCell"><span class="mcBadge running">admin</span></td>';
   }
-  var role = mcAccessRole(user.sub, server.InstanceId);
+  var role = mcAccessRole(user.sub, server.ServerId);
   var options = '<option value=""' + (role ? '' : ' selected') + '>&mdash;</option>' +
     MC_TEMPLATES.map(function (t) {
       return '<option value="' + t + '"' + (role === t ? ' selected' : '') + '>' + MC_TEMPLATE_LABELS[t] + '</option>';
     }).join('');
-  var dirty = mcAccessIsDirty(user.sub, server.InstanceId) ? ' mcAccessDirty' : '';
+  var dirty = mcAccessIsDirty(user.sub, server.ServerId) ? ' mcAccessDirty' : '';
   return '<td class="mcAccessCell">' +
     '<select class="mcAccessSelect' + dirty + '" data-sub="' + escapeHtml(user.sub) + '"' +
-    ' data-instance="' + escapeHtml(server.InstanceId) + '">' + options + '</select>' +
+    ' data-server="' + escapeHtml(server.ServerId) + '">' + options + '</select>' +
     '</td>';
 }
 
@@ -106,7 +106,7 @@ function mcAccessServerLabel(server) {
 //A row of nothing but "—" is a user who has never been granted anything, which is the common case right
 //after someone is added to the pool - so offer the whole row in one click rather than a cell at a time.
 function mcAccessRowHasGaps(user) {
-  return mcAccessServers.some(function (s) { return !mcAccessRole(user.sub, s.InstanceId); });
+  return mcAccessServers.some(function (s) { return !mcAccessRole(user.sub, s.ServerId); });
 }
 
 function renderAccessGrid() {
@@ -151,7 +151,7 @@ function renderAccessGrid() {
 
   body.querySelectorAll('.mcAccessSelect').forEach(function (select) {
     select.onchange = function () {
-      mcAccessEdited[mcAccessKey(select.dataset.sub, select.dataset.instance)] = select.value;
+      mcAccessEdited[mcAccessKey(select.dataset.sub, select.dataset.server)] = select.value;
       renderAccessGrid();
     };
   });
@@ -160,7 +160,7 @@ function renderAccessGrid() {
     button.onclick = function () {
       var sub = button.dataset.sub;
       mcAccessServers.forEach(function (s) {
-        if (!mcAccessRole(sub, s.InstanceId)) mcAccessEdited[mcAccessKey(sub, s.InstanceId)] = 'player';
+        if (!mcAccessRole(sub, s.ServerId)) mcAccessEdited[mcAccessKey(sub, s.ServerId)] = 'player';
       });
       renderAccessGrid();
     };
@@ -198,7 +198,7 @@ async function loadAccess() {
     mcAccessServers = data.servers || [];
     mcAccessSaved = {};
     (data.grants || []).forEach(function (g) {
-      mcAccessSaved[mcAccessKey(g.userSub, g.instanceId)] = g.role || '';
+      mcAccessSaved[mcAccessKey(g.userSub, g.serverId)] = g.role || '';
     });
     mcAccessEdited = {};
     mcAccessNames = {};

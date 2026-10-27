@@ -6,8 +6,8 @@ holds an access template on each server they can reach, assigned from the Contro
 ## Templates
 
 A template names a set of capabilities. Templates are defined in
-[`Lambda/gaming_server_start_stop-v1_0.py`](../Lambda/gaming_server_start_stop-v1_0.py)
-(`CAPABILITIES_BY_TEMPLATE`), so changing one changes it for everyone holding it.
+[`Lambda/go/internal/access/access.go`](../Lambda/go/internal/access/access.go), so changing one changes
+it for everyone holding it.
 
 | Template | Capabilities |
 |---|---|

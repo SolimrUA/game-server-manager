@@ -160,30 +160,42 @@ func loadEnvFile(path string) error {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		key, value, err := envAssignment(scanner.Text())
+		if err != nil {
+			return err
+		}
+		if key == "" {
 			continue
 		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return fmt.Errorf("invalid config line %q; expected KEY=value", line)
+		if _, alreadySet := os.LookupEnv(key); alreadySet {
+			continue
 		}
-
-		key = strings.TrimSpace(key)
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
-		if key == "" {
-			return fmt.Errorf("invalid config line %q; key is empty", line)
-		}
-
-		if _, exists := os.LookupEnv(key); !exists {
-			if err := os.Setenv(key, value); err != nil {
-				return err
-			}
+		if err := os.Setenv(key, value); err != nil {
+			return err
 		}
 	}
 
 	return scanner.Err()
+}
+
+// envAssignment reads one KEY=value line of the config file. A blank line or a comment is not an
+// assignment, and comes back with an empty key.
+func envAssignment(text string) (string, string, error) {
+	line := strings.TrimSpace(text)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", nil
+	}
+
+	key, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return "", "", fmt.Errorf("invalid config line %q; expected KEY=value", line)
+	}
+
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", "", fmt.Errorf("invalid config line %q; key is empty", line)
+	}
+	return key, strings.Trim(strings.TrimSpace(value), `"'`), nil
 }
 
 func requiredEnv(key string) string {

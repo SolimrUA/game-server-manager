@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,8 +13,7 @@ import (
 func main() {
 	config, err := LoadConfig()
 	must(err)
-	must(prepareLambdaAssets(&config))
-	must(buildGoLambda("../Lambda/go", "./backupservers", config.BackupLambdaAssetDir))
+	must(buildLambdas(config))
 
 	app := awscdk.NewApp(nil)
 	env := &awscdk.Environment{
@@ -41,23 +39,20 @@ func main() {
 	app.Synth(nil)
 }
 
-// prepareLambdaAssets stages each handler in its own directory as lambda_function.py, which is the
-// module name the handler setting expects. The files are named per version in the repository, and a
-// Python module name can't contain the dots and dashes those names use.
-func prepareLambdaAssets(config *Config) error {
-	for _, asset := range []struct {
-		source string
-		target *string
+// buildLambdas compiles every handler this app deploys. They share one Go module, and with it the
+// packages that describe a server, read its status and run commands on it.
+func buildLambdas(config Config) error {
+	for _, lambda := range []struct {
+		packagePath string
+		assetDir    string
 	}{
-		{"../Lambda/gaming_server_start_stop-v1_0.py", &config.ControlLambdaAssetDir},
-		{"../Lambda/update-dns-v1_0.py", &config.UpdateDnsAssetDir},
-		{"../Lambda/idle_shutdown.py", &config.IdleShutdownAssetDir},
+		{"./control", config.ControlLambdaAssetDir},
+		{"./updatedns", config.UpdateDnsAssetDir},
+		{"./idleshutdown", config.IdleShutdownAssetDir},
+		{"./backupservers", config.BackupLambdaAssetDir},
 	} {
-		if err := os.MkdirAll(*asset.target, 0o755); err != nil {
+		if err := buildGoLambda("../Lambda/go", lambda.packagePath, lambda.assetDir); err != nil {
 			return err
-		}
-		if err := copyFile(asset.source, filepath.Join(*asset.target, "lambda_function.py")); err != nil {
-			return fmt.Errorf("staging %s: %w", asset.source, err)
 		}
 	}
 	return nil
@@ -74,7 +69,11 @@ func buildGoLambda(moduleDir, packagePath, assetDir string) error {
 		return err
 	}
 
-	build := exec.Command("go", "build", "-trimpath", "-o", absolute, packagePath)
+	//-s -w leave out the symbol table and DWARF data, which nothing reads in Lambda and which are a
+	//large part of the binary's size. -buildvcs=false leaves out the commit the build was made from,
+	//which would otherwise change every binary on every commit and redeploy all four for no change.
+	build := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w",
+		"-o", absolute, packagePath)
 	build.Dir = moduleDir
 	//Lambda runs linux/amd64 regardless of what this is built on, and CGO would need a matching libc.
 	build.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
@@ -82,23 +81,6 @@ func buildGoLambda(moduleDir, packagePath, assetDir string) error {
 		return fmt.Errorf("building %s: %w\n%s", packagePath, err, output)
 	}
 	return nil
-}
-
-func copyFile(source, destination string) error {
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(destination)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
 }
 
 func must(err error) {
