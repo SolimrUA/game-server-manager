@@ -1,7 +1,7 @@
-# Server status data (players, mods, version)
+# Server status data (players, mods, version, disk)
 
 Each Server stack's EC2 instance is responsible for reporting its own live game state - current/max players,
-game version, and installed mods - by writing a small JSON file to the shared status bucket
+game version, installed mods and free disk space - by writing a small JSON file to the shared status bucket
 (`common-infra-status-bucket-name`, created in [`cfn/common-infra.yaml`](../cfn/common-infra.yaml)).
 
 ## Where it's written
@@ -57,6 +57,10 @@ the instance's `server-id` tag, and merges it into the `getinfo` API response as
     { "name": "wildcraft", "version": null }
   ],
   "lastSaveTime": "2026-08-15T12:30:00Z",
+  "disk": {
+    "data": { "totalGib": 9.8, "freeGib": 6.2 },
+    "root": { "totalGib": 7.6, "freeGib": 4.0 }
+  },
   "updatedAt": "2026-08-15T12:34:56Z"
 }
 ```
@@ -64,16 +68,28 @@ the instance's `server-id` tag, and merges it into the `getinfo` API response as
 - `serverName` - the display name players see when connecting/browsing for the server (Vintage Story:
   `serverconfig.json`'s `ServerName`; Valheim: the `NAME` env var, read back via `odin status`'s own `name`
   field). `null` if blank/unset. Promoted to the top-level `ServerName` field - see above.
-- `serviceStatus` - whether the game process is up: `active`, `activating`, `inactive`, `deactivating`, `failed`,
-  or `unknown` (the values `systemctl is-active` uses, though an agent may derive them any way that's accurate for
-  its game). Separate from the EC2 instance's own running/stopped state, which the control panel reads from
-  `ec2:DescribeInstances`: an instance can be `running` while the game is still starting, crash-looping, or not
-  installed.
+- `serviceStatus` - what the game process is doing, named after the values `systemctl is-active` uses, though an
+  agent may derive them any way that's accurate for its game:
+  - `active` - up and answering.
+  - `activating` - whatever supervises the game is up, but the game isn't answering yet.
+  - `deactivating` - shutting down.
+  - `inactive` - not running, and nothing failed.
+  - `failed` - ran and died, or is crash-looping.
+  - `unknown` - the agent couldn't tell.
+
+  The control panel reads `activating` as a game on its way up and `inactive` as one that is down on purpose, so
+  an agent that can't yet tell them apart reports `unknown` rather than picking one. Separate from the EC2
+  instance's own running/stopped state, which the control panel reads from `ec2:DescribeInstances`: an instance
+  can be `running` while the game is still starting, crash-looping, or not installed.
 - `players.current` / `players.max` - integers. `max` may be `null` if the agent couldn't determine it.
 - `mods` - array of `{name, version}`. `version` is `null` when it couldn't be determined (e.g. a mod without a
   parseable manifest). Empty array if the game has no mod support or none are installed.
 - `lastSaveTime` - UTC ISO-8601 timestamp of when the game itself last wrote its world data. Distinct from the
   Control Panel's "Last Backup" column (`LastBackupTime`), which comes from AWS Backup's EBS snapshot.
+- `disk` - free and total space on the two filesystems that can break a server by filling: `data`, the
+  persistent volume holding the world and anything the game archives, and `root`, holding the OS, docker
+  images and logs. Both in GiB, floored to a tenth - fine enough to watch, coarse enough that ordinary
+  write activity doesn't republish the snapshot. A filesystem the agent can't stat is omitted.
 - `updatedAt` - UTC ISO-8601 timestamp of when the agent last computed this snapshot (not necessarily when it was
   last *pushed*, since unchanged snapshots aren't re-uploaded).
 
@@ -89,8 +105,8 @@ container. For a third game:
    stack invokes the cartridge as `./install.sh "$GameServer"`, so `$1` is the script's own source URL - use it to
    fetch the status agent from wherever `install.sh` itself was served from.
 2. Have that agent write this JSON shape to the path above on an interval, pushing only on change - including
-   `serviceStatus` from whatever supervises the game process, so "EC2 running, game not up yet" is distinguishable
-   from "both running".
+   `serviceStatus` from whatever supervises the game process, so "EC2 running, game not up yet", "game down" and
+   "game crashed" are each distinguishable from "both running".
 3. Have the setup script write any values the agent needs (bucket name, status key) under
    `/etc/game-server-manager/`, not `/tmp`, which this AMI clears on every reboot - the agent re-reads them on
    every restart, so a `/tmp` value is there on first boot and gone on every one after.

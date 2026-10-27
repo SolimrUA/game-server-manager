@@ -303,6 +303,12 @@ table.mcServerTable tbody tr.mcServerRow.selected {
 .mcBadge.starting,
 .mcBadge.pending-resize { background: #FFF3D6; color: #92650A; }
 .mcBadge.error { background: #FDE8E8; color: #C0392B; }
+/* Outlined rather than filled: no state is being reported, as opposed to a state that is known. */
+.mcBadge.unknown { background: transparent; color: #51607A; box-shadow: inset 0 0 0 1px #C2CAD6; }
+
+.mcDiskWarn {
+    margin-left: 6px;
+}
 
 tr.mcServerDetail td {
     background: var(--grey-1);

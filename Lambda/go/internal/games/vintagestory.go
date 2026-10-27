@@ -61,9 +61,10 @@ func (vintageStory) DeleteFailure(req ModRequest, stdout string) error {
 }
 
 func (g vintageStory) Restart(string) ([]string, error) {
-	// Backgrounded because a restart takes longer than the control Lambda may wait for it.
+	// Backgrounded because a restart takes longer than the control Lambda may wait for it. Logged to
+	// a file rather than discarded, so a restart that fails to bring the game back says why.
 	return []string{
-		`setsid sh -c "sudo -u vintagestory ` + serverScript + ` restart" </dev/null >/dev/null 2>&1 &`,
+		`setsid sh -c "sudo -u vintagestory ` + serverScript + ` restart" </dev/null >/tmp/game-restart.log 2>&1 &`,
 	}, nil
 }
 

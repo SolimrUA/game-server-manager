@@ -203,16 +203,72 @@ function mcModSourceHint(gameName) {
   return MC_MOD_SOURCE_HINT[gameName] || { placeholder: 'mod identifier', label: 'Mod identifier' };
 }
 
+// Every reading of serviceStatus lives here, so the row badge and the Overview panel cannot drift
+// apart. The install status is checked first because the control Lambda only reports one while the
+// game has yet to say anything at all. `key` names the state for callers that treat some specially.
+function mcGameState(instance) {
+  if (instance['InstallStatus'] === 'failed') return { key: 'install-failed', text: 'Install Failed', badgeClass: 'error' };
+  if (instance['InstallStatus'] === 'installing') return { key: 'installing', text: 'Installing', badgeClass: 'pending' };
+  var serviceStatus = instance['GameStatus'] && instance['GameStatus'].serviceStatus;
+  // Nothing reported yet - the agent pushes its first snapshot a few seconds into the boot.
+  if (!serviceStatus) return { key: 'starting', text: 'Starting', badgeClass: 'pending' };
+  switch (serviceStatus) {
+    case 'active': return { key: 'running', text: 'Running', badgeClass: 'running' };
+    case 'activating': return { key: 'starting', text: 'Starting', badgeClass: 'pending' };
+    case 'deactivating': return { key: 'stopping', text: 'Stopping', badgeClass: 'pending' };
+    case 'inactive': return { key: 'stopped', text: 'Stopped', badgeClass: 'stopped' };
+    case 'failed': return { key: 'failed', text: 'Error', badgeClass: 'error' };
+    // An agent that cannot tell says so, rather than being read as a game on its way up.
+    default: return { key: 'unknown', text: 'Unknown', badgeClass: 'unknown' };
+  }
+}
+
 function mcGameStatus(instance) {
   if (instance['State'] !== 'running') {
     return { text: '—', badgeClass: null };
   }
-  var serviceStatus = instance['GameStatus'] && instance['GameStatus'].serviceStatus;
-  if (serviceStatus === 'active') return { text: 'Running', badgeClass: 'running' };
-  if (serviceStatus === 'failed') return { text: 'Crashed', badgeClass: 'error' };
-  if (serviceStatus === 'inactive') return { text: 'Stopped', badgeClass: 'stopped' };
-  if (instance['InstallStatus'] === 'installing') return { text: 'Installing…', badgeClass: 'pending' };
-  return { text: 'Starting…', badgeClass: 'pending' };
+  return mcGameState(instance);
+}
+
+// Below this much of a disk left, a server is close enough to breaking that its row says so without
+// having to be opened.
+var MC_DISK_WARN_FRACTION = 0.15;
+
+// Reported one disk at a time, because which one is short decides the fix: a full data volume needs
+// a resize or a clear-out, a full root is usually logs or docker images.
+var MC_DISK_LABELS = [['data', 'Data'], ['root', 'Root']];
+
+function mcDiskParts(disk) {
+  var parts = [];
+  MC_DISK_LABELS.forEach(function (entry) {
+    var d = disk && disk[entry[0]];
+    if (!d || d.totalGib == null || d.freeGib == null || d.totalGib <= 0) return;
+    parts.push({ label: entry[1], free: d.freeGib, total: d.totalGib, fraction: d.freeGib / d.totalGib });
+  });
+  return parts;
+}
+
+function mcDiskText(disk) {
+  var text = mcDiskParts(disk).map(function (p) {
+    return p.label + ' ' + p.free.toFixed(1) + ' / ' + p.total.toFixed(1) + ' GiB free';
+  }).join(' \u00b7 ');
+  return text ? escapeHtml(text) : '\u2014';
+}
+
+// A stopped server's last report says nothing about the disk of the one that boots next.
+function mcLowDisks(instance) {
+  if (instance['State'] !== 'running') return [];
+  var disk = instance['GameStatus'] && instance['GameStatus'].disk;
+  return mcDiskParts(disk).filter(function (p) { return p.fraction < MC_DISK_WARN_FRACTION; });
+}
+
+function mcDiskWarnHtml(instance) {
+  var low = mcLowDisks(instance);
+  if (!low.length) return '';
+  var detail = low.map(function (p) {
+    return p.label + ': ' + p.free.toFixed(1) + ' of ' + p.total.toFixed(1) + ' GiB free';
+  }).join(', ');
+  return '<span class="mcBadge error mcDiskWarn" title="' + escapeHtml(detail) + '">Disk low</span>';
 }
 
 // 'triggered-once' means one empty check is already recorded, so the next one stops the instance.
@@ -224,6 +280,8 @@ function mcIdleShutdownStatus(instance) {
   return { text: '—', badgeClass: null };
 }
 
+var MC_SCOPED_GAME_STATES = ['starting', 'stopping', 'stopped'];
+
 // Auto-shutdown merely being enabled isn't worth surfacing here; it stays in the Overview tab.
 function mcCombinedState(instance) {
   var ec2State = instance['State'];
@@ -232,13 +290,16 @@ function mcCombinedState(instance) {
     var label = ec2State ? ec2State.charAt(0).toUpperCase() + ec2State.slice(1).replace(/-/g, ' ') : 'Unknown';
     return { text: label + ' (EC2)', badgeClass: 'pending' };
   }
-  var serviceStatus = instance['GameStatus'] && instance['GameStatus'].serviceStatus;
-  if (serviceStatus === 'failed') return { text: 'Error', badgeClass: 'error' };
-  if (serviceStatus === 'inactive') return { text: 'Stopped (Game)', badgeClass: 'stopped' };
-  if (instance['InstallStatus'] === 'installing') return { text: 'Installing', badgeClass: 'pending' };
-  if (serviceStatus !== 'active') return { text: 'Starting (Game)', badgeClass: 'pending' };
-  if (instance['IdleShutdownStatus'] === 'triggered-once') return { text: 'Running (Idle)', badgeClass: 'idle' };
-  return { text: 'Running', badgeClass: 'running' };
+  var game = mcGameState(instance);
+  if (game.key === 'running' && instance['IdleShutdownStatus'] === 'triggered-once') {
+    return { text: 'Running (Idle)', badgeClass: 'idle' };
+  }
+  // This column carries one value for a whole server, so the states a reader could take for the
+  // instance's own say which they are about.
+  if (MC_SCOPED_GAME_STATES.indexOf(game.key) !== -1) {
+    return { text: game.text + ' (Game)', badgeClass: game.badgeClass };
+  }
+  return game;
 }
 
 // The control Lambda takes a slug, not an instance type: it resolves one through a fixed
@@ -471,7 +532,7 @@ async function renderTable(data) {
         '</span></td>' +
         '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
         '<td class="mcMuted">—</td>' +
-        '<td><span class="mcBadge ' + combinedState.badgeClass + '">' + escapeHtml(combinedState.text) + '</span></td>' +
+        '<td><span class="mcBadge ' + combinedState.badgeClass + '">' + escapeHtml(combinedState.text) + '</span>' + mcDiskWarnHtml(instance) + '</td>' +
         '<td>' + playersText + '</td>' +
         '<td>' + lastSaveText + '</td>' +
         '<td>' + mcLifecycleButtonHtml(ec2State, !canLifecycle) + '</td>' +
@@ -519,6 +580,7 @@ async function renderTable(data) {
         mcKvHtml('Auto-Shutdown', escapeHtml(idleStatus.text)) +
         mcKvHtml('Players', playersText) +
         mcKvHtml('Last Save', lastSaveText) +
+        mcKvHtml('Disk', mcDiskText(status && status.disk)) +
         mcKvHtml('Type', escapeHtml(instance['InstanceType'] || '—')) +
         mcKvHtml('IP Address', escapeHtml(instance['PublicIpAddress'] || '—')) +
         mcKvHtml('Version', versionText) +

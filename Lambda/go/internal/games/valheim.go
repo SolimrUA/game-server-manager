@@ -41,10 +41,11 @@ func (valheim) DeleteFailure(req ModRequest, stdout string) error {
 }
 
 // Restart brings the container down and back up, backgrounded because the graceful-stop period
-// alone is 60 seconds - longer than the control Lambda may wait.
+// alone is 60 seconds - longer than the control Lambda may wait. Logged to a file rather than
+// discarded, so a restart that takes the server down and fails to bring it back says why.
 func (g valheim) Restart(dataPath string) ([]string, error) {
 	return []string{
-		`setsid sh -c "cd ` + remote.Quote(dataPath) + ` && docker compose down && docker compose up -d" </dev/null >/dev/null 2>&1 &`,
+		`setsid sh -c "cd ` + remote.Quote(dataPath) + ` && docker compose down && docker compose up -d" </dev/null >/tmp/game-restart.log 2>&1 &`,
 	}, nil
 }
 

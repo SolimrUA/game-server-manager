@@ -2,7 +2,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-# Reports player count/max, version and mods to S3 every 5s, pushing only when something changed.
+# Reports player count/max, version, mods and free disk space to S3 every 5s, pushing only when
+# something changed.
 # docs/server-status.md documents the JSON schema.
 import hashlib
 import json
@@ -20,6 +21,7 @@ STATUS_TMP_FILE = "/tmp/status_push.json"
 SERVER_SH = "/home/vintagestory/server/server.sh"
 #Matches server.sh's own PGREPTEST, so this liveness check agrees with the game's tooling.
 PGREP_PATTERN = "dotnet VintagestoryServer.dll --dataPath {}".format(DATA_PATH)
+SERVICE_UNIT = "vintagestory"
 #/etc/game-server-manager, not /tmp, which this AMI clears on every reboot - this code re-runs on every
 #restart of this long-lived service, including after one.
 with open("/etc/game-server-manager/statusBucket.txt") as f:
@@ -34,15 +36,47 @@ PLAYERS_ONLINE_RE = re.compile(r"Players online:\s*(\d+)\s*/\s*(\d+)", re.IGNORE
 VERSION_RE = re.compile(r"Version:\s*(\S+)", re.IGNORECASE)
 
 
+def game_process_running():
+    return subprocess.run(["pgrep", "-f", PGREP_PATTERN], capture_output=True).returncode == 0
+
+
+def read_unit_state():
+    #Type=oneshot with RemainAfterExit, so this reports whether the last start attempt succeeded,
+    #not whether the game is still up - server.sh detaches the game into a screen session systemd
+    #never sees. Empty when systemctl itself didn't answer.
+    try:
+        result = subprocess.run(["systemctl", "is-active", SERVICE_UNIT],
+                                capture_output=True, text=True, timeout=15)
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
 def read_service_status():
-    #systemd only sees server.sh, not the game process it detaches into a screen session, so
-    #`systemctl is-active` reports whether server.sh's startup run succeeded, not whether the game is up.
     #Answers only "is the OS process there"; read_stats() below answers "is it responding yet".
     try:
-        result = subprocess.run(["pgrep", "-f", PGREP_PATTERN], capture_output=True)
-        return "active" if result.returncode == 0 else "inactive"
+        if game_process_running():
+            return "active"
     except Exception:
         return "unknown"
+
+    unit = read_unit_state()
+    if unit == "failed":
+        return "failed"
+    if unit == "active":
+        #server.sh returns once the screen session is up and the game process appears a moment
+        #later, so one missed pgrep is not yet a crash.
+        time.sleep(2)
+        if game_process_running():
+            return "active"
+        #systemd records this unit as started and nothing is running under it: the game died after
+        #a start it reported as successful, which is the only way a crash shows up here.
+        return "failed"
+    if unit in ("activating", "deactivating"):
+        return unit
+    if unit == "":
+        return "unknown"
+    return "inactive"
 
 
 def send_console_command(command):
@@ -135,6 +169,29 @@ def read_mods():
     return mods
 
 
+GIB = 1024 ** 3
+
+
+def read_disk():
+    #Root as well as data: logs and docker images fill root, the world and its archives fill data,
+    #and either one filling breaks the server.
+    #Floored to a tenth of a GiB, because this feeds the change hash that decides whether to push -
+    #byte-exact free space would make every poll a push. Floored, not rounded, so a reading never
+    #claims more room than the server has.
+    disks = {}
+    for name, path in (("data", DATA_PATH), ("root", "/")):
+        try:
+            stat = os.statvfs(path)
+        except OSError:
+            continue
+        disks[name] = {
+            "totalGib": stat.f_blocks * stat.f_frsize * 10 // GIB / 10,
+            #f_bavail, not f_bfree: the reserve only root may use is not room the game can write into.
+            "freeGib": stat.f_bavail * stat.f_frsize * 10 // GIB / 10,
+        }
+    return disks
+
+
 def push_status(status):
     with open(STATUS_TMP_FILE, "w") as f:
         json.dump(status, f)
@@ -169,6 +226,7 @@ def main():
             },
             "mods": read_mods(),
             "lastSaveTime": read_last_save_time(),
+            "disk": read_disk(),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         comparable = {k: v for k, v in status.items() if k != "updatedAt"}

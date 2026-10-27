@@ -2,7 +2,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-# Reports player count/max, version and mods to S3 every 5s, pushing only when something changed.
+# Reports player count/max, version, mods and free disk space to S3 every 5s, pushing only when
+# something changed.
 # docs/server-status.md documents the JSON schema.
 import glob
 import hashlib
@@ -65,10 +66,47 @@ def parse_odin_version(raw):
     return match.group(1) if match else raw
 
 
-def read_service_status(odin_status):
-    if odin_status is None:
-        return "inactive"
-    return "active" if odin_status.get("online") else "inactive"
+def read_container_state():
+    #Asked of Docker, not Odin: Odin only answers from inside a running container, so it cannot tell
+    #a game still loading from one whose container never started. Returns the container's state,
+    #"absent" when compose has no container for the service, or None when Docker itself didn't answer.
+    try:
+        found = subprocess.run(
+            ["docker", "compose", "-f", COMPOSE_FILE, "ps", "-aq", COMPOSE_SERVICE],
+            capture_output=True, text=True, timeout=15)
+        if found.returncode != 0:
+            print("docker compose ps exited {}: stderr={!r}".format(found.returncode, found.stderr))
+            return None
+        containers = found.stdout.split()
+        if not containers:
+            return "absent"
+        state = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", containers[0]],
+            capture_output=True, text=True, timeout=15)
+        if state.returncode != 0:
+            print("docker inspect exited {}: stderr={!r}".format(state.returncode, state.stderr))
+            return None
+        return state.stdout.strip()
+    except Exception as e:
+        print("read_container_state failed: {}".format(e))
+        return None
+
+
+def read_service_status(container_state, odin_status):
+    #Odin reporting online is the only thing that means the game is up. Everything else is read from
+    #the container, which is what distinguishes a game still loading from one that died.
+    if container_state is None:
+        return "unknown"
+    status, _, exit_code = container_state.partition(" ")
+    if status == "running":
+        return "active" if (odin_status or {}).get("online") else "activating"
+    if status == "restarting":
+        #The container is being brought back after dying, so the game is crash-looping.
+        return "failed"
+    if status in ("exited", "dead"):
+        return "inactive" if exit_code.strip() == "0" else "failed"
+    #"absent" (compose down, or an `up` that never succeeded), "created" and "paused".
+    return "inactive"
 
 
 def read_mods(odin_status):
@@ -103,6 +141,29 @@ def read_last_save_time():
         return None
 
 
+GIB = 1024 ** 3
+
+
+def read_disk():
+    #Root as well as data: logs and docker images fill root, the world and its archives fill data,
+    #and either one filling breaks the server.
+    #Floored to a tenth of a GiB, because this feeds the change hash that decides whether to push -
+    #byte-exact free space would make every poll a push. Floored, not rounded, so a reading never
+    #claims more room than the server has.
+    disks = {}
+    for name, path in (("data", DATA_DIR), ("root", "/")):
+        try:
+            stat = os.statvfs(path)
+        except OSError:
+            continue
+        disks[name] = {
+            "totalGib": stat.f_blocks * stat.f_frsize * 10 // GIB / 10,
+            #f_bavail, not f_bfree: the reserve only root may use is not room the game can write into.
+            "freeGib": stat.f_bavail * stat.f_frsize * 10 // GIB / 10,
+        }
+    return disks
+
+
 def push_status(status):
     with open(STATUS_TMP_FILE, "w") as f:
         json.dump(status, f)
@@ -117,8 +178,11 @@ def main():
             last_hash = f.read().strip()
 
     while True:
-        odin_status = read_odin_status()
-        service_status = read_service_status(odin_status)
+        container_state = read_container_state()
+        #Only asked when there is a container to ask - exec into a stopped one just fails, which
+        #would fill the journal with a failure every five seconds while the server is down.
+        odin_status = read_odin_status() if (container_state or "").startswith("running") else None
+        service_status = read_service_status(container_state, odin_status)
         active = service_status == "active"
         status = {
             "gameName": "valheim",
@@ -131,6 +195,7 @@ def main():
             },
             "mods": read_mods(odin_status),
             "lastSaveTime": read_last_save_time(),
+            "disk": read_disk(),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         comparable = {k: v for k, v in status.items() if k != "updatedAt"}
