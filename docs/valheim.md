@@ -14,3 +14,7 @@ Create one from the control panel's **New server** form, picking Valheim - see t
   direct URLs), not by uploading files. See
   [mbround18/valheim-docker's mod docs](https://mbround18.github.io/valheim-docker/tutorials/getting_started_with_mods.html)
   for the exact syntax - environment variable names are case-sensitive (`TYPE`, not `Type`).
+- Removing a mod from that `MODS` list is what uninstalls it: Odin reconciles the installed files
+  against the list and deletes whatever is no longer named. The image only reconciles on startup when
+  `MODS` is non-empty, so the control panel runs the reconcile itself after editing the list - without
+  that, removing the last mod would leave it installed and still loaded.
