@@ -51,6 +51,15 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 		controlPanelUrl = jsii.String(fmt.Sprintf("https://%s", config.FrontEndDomain))
 	}
 
+	// A named OIDC provider lives on the pool, so there is no provider resource here.
+	providers := []awscognito.UserPoolClientIdentityProvider{
+		awscognito.UserPoolClientIdentityProvider_COGNITO(),
+	}
+	if config.AuthentikProviderName != "" {
+		providers = append(providers,
+			awscognito.UserPoolClientIdentityProvider_Custom(jsii.String(config.AuthentikProviderName)))
+	}
+
 	userPoolClient := awscognito.NewUserPoolClient(stack, jsii.String("UserPoolClient"), &awscognito.UserPoolClientProps{
 		UserPool:       userPool,
 		GenerateSecret: jsii.Bool(false),
@@ -60,9 +69,7 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 			CallbackUrls: &[]*string{jsii.String(*controlPanelUrl + "/signed_in.html")},
 			LogoutUrls:   &[]*string{jsii.String(*controlPanelUrl + "/logout.html")},
 		},
-		SupportedIdentityProviders: &[]awscognito.UserPoolClientIdentityProvider{
-			awscognito.UserPoolClientIdentityProvider_COGNITO(),
-		},
+		SupportedIdentityProviders: &providers,
 	})
 
 	// --- who may do what, per user per server -------------------------------

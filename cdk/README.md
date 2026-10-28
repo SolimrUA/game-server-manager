@@ -35,6 +35,10 @@ The Cognito user pool, its hosted-UI domain and its `admins` group are reference
 accounts, and a pool allows only one domain and one group of a given name. The app client belongs to
 this stack; a pool takes as many of those as you like.
 
+An external identity provider is referenced by name, in `OIDC_PROVIDER_NAME`, and offered as a
+sign-in option beside the pool's own. It lives on the pool, like the accounts, and must exist before a
+deploy names it; empty offers the pool's own sign-in alone.
+
 The TLS certificate is referenced by ARN: CloudFront requires it in us-east-1.
 
 The web bucket is created here and filled by `CdkAssetPublisher`, which reads this stack's outputs.

@@ -85,6 +85,11 @@ type Config struct {
 	CognitoDomainPrefix string
 	CertificateArn      string
 
+	// AuthentikProviderName must match an OIDC provider that already exists on the pool: nothing here
+	// creates one, and naming an absent provider fails the deploy. Empty offers the pool's own
+	// sign-in alone.
+	AuthentikProviderName string
+
 	IdTagName  string
 	IdTagValue string
 
@@ -130,6 +135,8 @@ func LoadConfig() (Config, error) {
 
 		UserPoolId:          requiredEnv("COGNITO_USER_POOL_ID"),
 		CognitoDomainPrefix: requiredEnv("COGNITO_DOMAIN_PREFIX"),
+
+		AuthentikProviderName: stringEnv("OIDC_PROVIDER_NAME", ""),
 
 		IdTagName:  stringEnv("ID_TAG_NAME", "game-server-finder"),
 		IdTagValue: stringEnv("ID_TAG_VALUE", "game-server"),
