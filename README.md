@@ -20,7 +20,6 @@ behind it.
 Four stacks, none of which contains a game server:
 
 - **Common** ([`cfn/common-infra.yaml`](cfn/common-infra.yaml)) - shared VPC/networking and the shared server-status S3 bucket. Deploy once per account+region.
-- **Asset Publisher** ([`CdkAssetPublisher/`](CdkAssetPublisher/)) - uploads your local game scripts and web site to a bucket you own.
 - **Fleet** ([`cdk/fleet.go`](cdk/fleet.go)) - what every server shares: the instance role, one Security Group per game, one backup plan, and the schedule that stops idle servers.
 - **Control Panel** ([`cdk/controlpanel.go`](cdk/controlpanel.go)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront site.
 
@@ -37,7 +36,7 @@ The control panel finds the servers it manages by an EC2 tag (`ID_TAG_NAME`/`ID_
 
 ## Deploying
 
-None of these stacks fetch anything from the public internet at deploy time. The game install scripts and web site files come from an S3 bucket you control, published by `CdkAssetPublisher/`, and the Lambdas are compiled from this repository at deploy time - so every install runs a version you reviewed and pinned rather than whatever is on `main`.
+None of these stacks fetch anything from the public internet at deploy time. The game install scripts and web site files come from an S3 bucket you control, published from this repository, and the Lambdas are compiled from this repository at deploy time - so every install runs a version you reviewed and pinned rather than whatever is on `main`.
 
 Each new server also verifies a script against a SHA256 hash the Fleet stack pinned at deploy time before executing it, so even write access to that bucket can't get anything executed that you didn't approve.
 
@@ -51,61 +50,28 @@ aws cloudformation deploy \
   --stack-name game-server-common-cfn
 ```
 
-### 2. Publish your assets - once per account+region
-
-`CdkAssetPublisher/` is a small Go CDK app that uploads your **local** copy of the game install scripts - all files
-under `scripts/`, one per game - to your own S3 bucket.
-
-It also publishes the web site, but straight to the bucket CloudFront serves rather than to the assets bucket - see [step 4](#4-publish-the-web-site). On a first install there is no Control Panel yet, so it says it is skipping the web site and carries on.
-
-From `CdkAssetPublisher/`, create a local `.env` (ignored by git) or export the same values in your shell:
-
-```text
-AWS_ACCOUNT=123456789012
-AWS_REGION=eu-central-1
-ASSET_BUCKET_NAME=your-unique-bucket-name
-CREATE_ASSET_BUCKET=true
-ASSET_KEY_PREFIX=personal-game-server-manager/v1
-```
-
-Set `CREATE_ASSET_BUCKET=false` if the bucket already exists and should only be used as a deployment target. Its account- and bucket-level public access settings must allow the generated prefix policy: the app grants public `s3:GetObject` on that one prefix, since your EC2 instances and CloudFront fetch these files over HTTPS. Keep the prefix for deployment assets only.
-
-```bash
-cd CdkAssetPublisher
-go mod tidy
-cdk bootstrap aws://ACCOUNT/REGION
-cdk deploy
-```
-
-This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints the outputs you'll need for the next two steps:
-
-- `ScriptsBaseUrl` - the base URL the published install scripts sit under.
-- A `<Game>InstallSha256`, `<Game>StatusAgentSha256` and `<Game>ApplyConfigSha256` for each game - SHA256 digests of each script's current content. A new server verifies each script it downloads against these before running it.
-
-The Fleet stack reads these outputs at synth time, so re-run `cdk deploy` here whenever you change a
-game script, then deploy `cdk/` again to pick up the new digest.
-
-### 3. Fleet and Control Panel - once
+### 2. Everything else - once
 
 ```bash
 cd cdk
+go mod tidy
+cdk bootstrap aws://ACCOUNT/REGION
 cdk deploy --all
 ```
 
-Configuration lives in `cdk/.env` - copy the block at the top of [`cdk/config.go`](cdk/config.go). The custom domain is optional; see [`cdk/README.md`](cdk/README.md).
+This deploys three stacks: the assets bucket holding the game scripts, the fleet every server shares,
+and the control panel with its web site. Each script is digested as it is published, and a new server
+checks what it downloads against that digest before running it.
 
-### 4. Publish the control panel
+Configuration lives in `cdk/.env` - copy the block at the top of [`cdk/config.go`](cdk/config.go). The
+custom domain is optional; see [`cdk/README.md`](cdk/README.md). Set `CREATE_ASSET_BUCKET=false` if the
+assets bucket already exists and should only be published into; its account- and bucket-level public
+access settings must then allow the prefix policy, since your EC2 instances fetch scripts over HTTPS
+with no credentials of their own. Keep that prefix for deployment assets only.
 
-Run the publisher again, this time with a Control Panel to read from:
+Re-run the same command after changing anything under `scripts/` or `FrontEnd/`.
 
-```bash
-cd CdkAssetPublisher
-cdk deploy
-```
-
-This reads the Control Panel stack's outputs, writes them into `js/config.js`'s placeholders, uploads the result to the bucket CloudFront serves, and invalidates the distribution so the new files are served immediately. The staged copy is left in `build/controlpanel/` if you want to check what went up. Re-run it after any change under `FrontEnd/`; nothing else needs redeploying.
-
-### 5. Create a server
+### 3. Create a server
 
 Sign in to the control panel as a member of the Cognito `admins` group and use **New server**. Pick the
 game, give the server an id (lowercase letters, digits and dashes - it names its DNS record, its data

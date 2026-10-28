@@ -20,22 +20,27 @@ func main() {
 		Account: jsii.String(config.AwsAccount),
 		Region:  jsii.String(config.AwsRegion),
 	}
+	assets := NewAssetsStack(app, config.AssetsStackName, &AssetsStackProps{
+		StackProps: awscdk.StackProps{Env: env},
+		Config:     config,
+	})
+
 	fleet := NewFleetStack(app, config.FleetStackName, &FleetStackProps{
 		StackProps: awscdk.StackProps{Env: env},
 		Config:     config,
 	})
 
-	publisherOutputs, err := lookupStackOutputs(config.PublisherStackName, config.AwsRegion)
-	must(err)
-	templates, err := resolveTemplates(publisherOutputs, fleet.SecurityGroupIds)
+	templates, err := resolveTemplates(config, fleet.SecurityGroupIds)
 	must(err)
 
-	NewControlPanelStack(app, config.ControlPanelStackName, &ControlPanelStackProps{
+	controlPanel := NewControlPanelStack(app, config.ControlPanelStackName, &ControlPanelStackProps{
 		StackProps: awscdk.StackProps{Env: env},
 		Config:     config,
 		Fleet:      fleet,
 		Templates:  templates,
 	})
+	// The digests it hands out are of scripts that have to be in the bucket by then.
+	controlPanel.AddDependency(assets, jsii.String("servers download the published scripts"))
 	app.Synth(nil)
 }
 

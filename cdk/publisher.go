@@ -3,36 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strings"
 )
-
-// lookupStackOutputs reads a deployed stack's outputs at synth time.
-func lookupStackOutputs(stackName, region string) (map[string]string, error) {
-	cmd := exec.Command("aws", "cloudformation", "describe-stacks",
-		"--stack-name", stackName,
-		"--region", region,
-		"--query", "Stacks[0].Outputs",
-		"--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("could not read outputs of stack %q; deploy it first", stackName)
-	}
-
-	var entries []struct {
-		OutputKey   string `json:"OutputKey"`
-		OutputValue string `json:"OutputValue"`
-	}
-	if err := json.Unmarshal(out, &entries); err != nil {
-		return nil, fmt.Errorf("could not read outputs of stack %q: %w", stackName, err)
-	}
-
-	values := map[string]string{}
-	for _, e := range entries {
-		values[e.OutputKey] = e.OutputValue
-	}
-	return values, nil
-}
 
 // ResolvedTemplate is a GameTemplate with the published script URLs, digests and security group filled
 // in. The control Lambda creates servers from these alone, so it needs no lookups of its own.
@@ -51,19 +22,20 @@ type ResolvedTemplate struct {
 	RequiresGameVersion    bool    `json:"requiresGameVersion"`
 }
 
-// resolveTemplates pairs each template with the asset publisher's current script digests and the
+// resolveTemplates pairs each template with the digests of the scripts this deploy publishes and the
 // security group the fleet stack made for that game.
-func resolveTemplates(publisherOutputs map[string]string, securityGroupIds map[string]*string) (string, error) {
-	base := strings.TrimRight(publisherOutputs["ScriptsBaseUrl"], "/")
-	if base == "" {
-		return "", fmt.Errorf("the asset publisher has no ScriptsBaseUrl output")
-	}
+func resolveTemplates(config Config, securityGroupIds map[string]*string) (string, error) {
+	base := scriptsBaseUrl(config)
 
 	resolved := map[string]ResolvedTemplate{}
 	for _, t := range GameTemplates {
-		installSha := publisherOutputs[t.InstallShaOutput]
-		if installSha == "" {
-			return "", fmt.Errorf("the asset publisher has no %s output", t.InstallShaOutput)
+		digests := map[string]string{}
+		for _, script := range []string{t.InstallScript, t.CompanionScript, t.ApplyConfigScript} {
+			digest, err := scriptDigest("../scripts/" + script)
+			if err != nil {
+				return "", fmt.Errorf("digesting %s: %w", script, err)
+			}
+			digests[script] = digest
 		}
 		groupId := securityGroupIds[t.Game]
 		if groupId == nil {
@@ -72,9 +44,9 @@ func resolveTemplates(publisherOutputs map[string]string, securityGroupIds map[s
 		resolved[t.Game] = ResolvedTemplate{
 			DisplayName:            t.DisplayName,
 			InstallScriptUrl:       base + "/" + t.InstallScript,
-			InstallSha256:          installSha,
-			CompanionSha256:        publisherOutputs[t.CompanionShaOutput],
-			ApplyConfigSha256:      publisherOutputs[t.ApplyConfigShaOutput],
+			InstallSha256:          digests[t.InstallScript],
+			CompanionSha256:        digests[t.CompanionScript],
+			ApplyConfigSha256:      digests[t.ApplyConfigScript],
 			DataPath:               t.DataPath,
 			WorldDownloadPaths:     t.WorldDownloadPaths,
 			WorldDownloadCorePaths: t.WorldDownloadCorePaths,

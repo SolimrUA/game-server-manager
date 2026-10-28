@@ -24,6 +24,13 @@ const localConfigFile = ".env"
 // HOSTED_ZONE_NAME=example.com
 // CERTIFICATE_ARN=arn:aws:acm:us-east-1:123456789012:certificate/...
 //
+// The bucket the game scripts are published to. An instance fetches its install script from here
+// over HTTPS before it has credentials, so the published prefix is readable by anyone. Set
+// CREATE_ASSET_BUCKET=false for a bucket that already exists and should only be published into.
+// ASSET_BUCKET_NAME=your-unique-bucket-name
+// CREATE_ASSET_BUCKET=true
+// ASSET_KEY_PREFIX=personal-game-server-manager/v1
+//
 // The accounts, referenced rather than created so replacing this stack can never delete them.
 // COGNITO_USER_POOL_ID=eu-central-1_xxxxxxxxx
 // COGNITO_DOMAIN_PREFIX=xxxxxxxxxxxxxx
@@ -35,7 +42,7 @@ const localConfigFile = ".env"
 // Optional.
 // CONTROL_PANEL_STACK_NAME=game-server-controlpanel-cdk
 // FLEET_STACK_NAME=game-server-fleet-cfn
-// PUBLISHER_STACK_NAME=GameServerAssetPublisher
+// ASSETS_STACK_NAME=game-server-assets-cfn
 // MAX_SERVERS=10
 // KEEP_BACKUPS_PER_SERVER=5
 // SUPERSEDED_BACKUP_DAYS=30
@@ -52,6 +59,7 @@ type Config struct {
 
 	ControlPanelStackName string
 	FleetStackName        string
+	AssetsStackName       string
 
 	// The tag marking a server the control panel created. Backups and idle shutdown select on it, so a
 	// server not carrying it is left alone by both.
@@ -67,7 +75,11 @@ type Config struct {
 	// a deleted server keeps one world and lets the rest run out.
 	SupersededBackupDays int
 
-	PublisherStackName string
+	// AssetBucketName is the bucket the game scripts are published to and fetched from over HTTPS.
+	// CreateAssetBucket is false when it already exists and this app should only publish into it.
+	AssetBucketName   string
+	CreateAssetBucket bool
+	AssetKeyPrefix    string
 	// AmiParameter is the public SSM parameter holding the AMI a new server launches from.
 	AmiParameter string
 	// MaxServers caps how many servers can exist at once, whatever a caller asks for.
@@ -112,7 +124,8 @@ func LoadConfig() (Config, error) {
 		// side until the old one is deleted.
 		ControlPanelStackName: stringEnv("CONTROL_PANEL_STACK_NAME", "game-server-controlpanel-cdk"),
 		//Must match the game-server-*-cfn pattern the deploy role is scoped to.
-		FleetStackName: stringEnv("FLEET_STACK_NAME", "game-server-fleet-cfn"),
+		FleetStackName:  stringEnv("FLEET_STACK_NAME", "game-server-fleet-cfn"),
+		AssetsStackName: stringEnv("ASSETS_STACK_NAME", "game-server-assets-cfn"),
 
 		ManagedTag:           stringEnv("MANAGED_TAG", "managed-by"),
 		ManagedValue:         stringEnv("MANAGED_VALUE", "control-panel"),
@@ -121,7 +134,9 @@ func LoadConfig() (Config, error) {
 		KeepBackupsPerServer: intEnv("KEEP_BACKUPS_PER_SERVER", 5),
 		SupersededBackupDays: intEnv("SUPERSEDED_BACKUP_DAYS", 30),
 
-		PublisherStackName: stringEnv("PUBLISHER_STACK_NAME", "GameServerAssetPublisher"),
+		AssetBucketName:   requiredEnv("ASSET_BUCKET_NAME"),
+		CreateAssetBucket: boolEnv("CREATE_ASSET_BUCKET", true),
+		AssetKeyPrefix:    stringEnv("ASSET_KEY_PREFIX", "personal-game-server-manager/v1"),
 		AmiParameter: stringEnv("AMI_PARAMETER",
 			"/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"),
 		MaxServers: intEnv("MAX_SERVERS", 10),
@@ -233,6 +248,17 @@ func intEnv(key string, fallback int) int {
 		panic(fmt.Sprintf("invalid integer value for %s: %q", key, value))
 	}
 	return parsed
+}
+
+func boolEnv(key string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "":
+		return fallback
+	case "1", "true", "yes", "y":
+		return true
+	default:
+		return false
+	}
 }
 
 func stringEnv(key, fallback string) string {

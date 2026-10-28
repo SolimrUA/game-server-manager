@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsapigateway"
@@ -15,6 +17,7 @@ import (
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsroute53"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsroute53targets"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awss3"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awss3deployment"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsstepfunctions"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsstepfunctionstasks"
 	"github.com/aws/constructs-go/constructs/v10"
@@ -177,13 +180,14 @@ func NewControlPanelStack(scope constructs.Construct, id string, props *ControlP
 
 	// --- the API ------------------------------------------------------------
 	api := addApi(stack, controlLambda, userPool, config)
+	publishControlPanel(stack, config, controlPanelBucket, distribution, api, userPoolClient, controlPanelUrl)
 
 	// Everything the published config.js needs, and the values a Server stack is deployed with.
 	outputs := map[string]*string{
 		"ControlApiUrl":            api.Url(),
 		"CognitoUserPoolId":        userPool.UserPoolId(),
 		"CognitoClientID":          userPoolClient.UserPoolClientId(),
-		"CognitoDomainName":        jsii.String(fmt.Sprintf("%s.auth.%s.amazoncognito.com", config.CognitoDomainPrefix, config.AwsRegion)),
+		"CognitoDomainName":        jsii.String(cognitoDomainName(config)),
 		"ControlPanelUrl":          controlPanelUrl,
 		"CloudfrontUrl":            jsii.String(fmt.Sprintf("https://%s", *distribution.DistributionDomainName())),
 		"CloudFrontDistributionId": distribution.DistributionId(),
@@ -249,7 +253,6 @@ func addApi(stack awscdk.Stack, fn awslambda.IFunction, userPool awscognito.IUse
 }
 
 // addControlPanelSite serves the control panel from a private bucket through CloudFront.
-// CdkAssetPublisher fills the bucket, using this stack's outputs.
 func addControlPanelSite(stack awscdk.Stack, config Config) (awscloudfront.Distribution, awss3.Bucket) {
 	bucket := awss3.NewBucket(stack, jsii.String("WebBucket"), &awss3.BucketProps{
 		BlockPublicAccess: awss3.BlockPublicAccess_BLOCK_ALL(),
@@ -290,4 +293,59 @@ func addControlPanelSite(stack awscdk.Stack, config Config) (awscloudfront.Distr
 	}
 
 	return distribution, bucket
+}
+
+// publishControlPanel uploads FrontEnd/ to the bucket CloudFront serves, and invalidates the
+// distribution so the new files are served at once rather than when the cache expires.
+func publishControlPanel(stack awscdk.Stack, config Config, bucket awss3.Bucket,
+	distribution awscloudfront.Distribution, api awsapigateway.RestApi,
+	userPoolClient awscognito.UserPoolClient, controlPanelUrl *string) {
+
+	awss3deployment.NewBucketDeployment(stack, jsii.String("PublishControlPanel"), &awss3deployment.BucketDeploymentProps{
+		Sources: &[]awss3deployment.ISource{
+			awss3deployment.Source_Asset(jsii.String("../FrontEnd"), nil),
+			awss3deployment.Source_Data(jsii.String("js/config.js"),
+				controlPanelConfigJs(config, api, userPoolClient, controlPanelUrl), nil),
+		},
+		DestinationBucket: bucket,
+		// FrontEnd/README.md documents the directory for whoever reads the repo; it isn't part of the site.
+		Exclude:           jsii.Strings("README.md"),
+		Prune:             jsii.Bool(true),
+		Distribution:      distribution,
+		DistributionPaths: jsii.Strings("/*"),
+	})
+}
+
+// controlPanelConfigJs fills in FrontEnd/js/config.js, which stays the one definition of that file's
+// shape. The values are resolved as this stack deploys, so they are the ones it just created.
+func controlPanelConfigJs(config Config, api awsapigateway.RestApi,
+	userPoolClient awscognito.UserPoolClient, controlPanelUrl *string) *string {
+
+	raw, err := os.ReadFile("../FrontEnd/js/config.js")
+	if err != nil {
+		panic(err)
+	}
+
+	contents := string(raw)
+	for placeholder, value := range map[string]string{
+		"REPLACE-WITH-CFURL":      *controlPanelUrl,
+		"REPLACE-WITH-COGNITO":    *userPoolClient.UserPoolClientId(),
+		"REPLACE-WITH-COGDOMAIN":  cognitoDomainName(config),
+		"REPLACE-WITH-APIURL":     *api.Url(),
+		"REPLACE-WITH-POOLS-ID":   config.UserPoolId,
+		"REPLACE-WITH-IDTAGNAME":  config.IdTagName,
+		"REPLACE-WITH-IDTAGVALUE": config.IdTagValue,
+		"REPLACE-WITH-STACKNAME":  config.ControlPanelStackName,
+	} {
+		contents = strings.ReplaceAll(contents, placeholder, value)
+	}
+
+	if remaining := strings.Count(contents, "REPLACE-WITH-"); remaining > 0 {
+		panic(fmt.Sprintf("js/config.js still has %d unfilled placeholder(s)", remaining))
+	}
+	return jsii.String(contents)
+}
+
+func cognitoDomainName(config Config) string {
+	return fmt.Sprintf("%s.auth.%s.amazoncognito.com", config.CognitoDomainPrefix, config.AwsRegion)
 }

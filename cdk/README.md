@@ -11,14 +11,13 @@ Copy the block at the top of [`config.go`](config.go) into `.env`, which git ign
 ## Deploying
 
 ```bash
-cd ../CdkAssetPublisher && cdk deploy  # Lambda code and game scripts
-cd ../cdk && cdk deploy --all          # these stacks
-cd ../CdkAssetPublisher && cdk deploy  # the web site, from the control panel's outputs
+cdk deploy --all
 ```
 
-The publisher runs twice because the control panel needs the scripts' digests, and the web site needs
-the control panel's outputs. `CONTROL_PANEL_STACK_NAME` tells the publisher which stack's outputs fill
-`js/config.js`.
+Three stacks: the assets bucket the game scripts are published to, the fleet every server shares, and
+the control panel with its web site. A script's digest is computed from the file being published, and
+`js/config.js` is filled in from the control panel's own constructs, so a deploy needs nothing read
+back from a previous one.
 
 ## The custom domain is optional
 
@@ -41,4 +40,6 @@ deploy names it; empty offers the pool's own sign-in alone.
 
 The TLS certificate is referenced by ARN: CloudFront requires it in us-east-1.
 
-The web bucket is created here and filled by `CdkAssetPublisher`, which reads this stack's outputs.
+The assets bucket is referenced by name, and created here only when `CREATE_ASSET_BUCKET` is set. Its
+policy grants public `s3:GetObject` on the published prefix, because an instance fetches its install
+script before it has credentials of its own.
