@@ -10,6 +10,7 @@ const (
 	Download     Capability = "download"
 	Content      Capability = "content"
 	Backup       Capability = "backup"
+	Password     Capability = "password"
 	AutoShutdown Capability = "autoshutdown"
 	Resize       Capability = "resize"
 )
@@ -26,12 +27,12 @@ const (
 
 var templates = map[Template]Set{
 	Player: {View, Lifecycle, Download},
-	Owner:  {View, Lifecycle, Download, Content, Backup},
+	Owner:  {View, Lifecycle, Download, Content, Backup, Password},
 }
 
 // admin is every capability. AutoShutdown and Resize are admin-only: they change what a server costs
 // to run.
-var admin = Set{View, Lifecycle, Download, Content, Backup, AutoShutdown, Resize}
+var admin = Set{View, Lifecycle, Download, Content, Backup, Password, AutoShutdown, Resize}
 
 // Set is the capabilities a caller holds on one server.
 type Set []Capability

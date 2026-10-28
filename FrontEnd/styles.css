@@ -363,13 +363,15 @@ tr.mcServerDetail td {
 .mcActionClusters {
     padding: 20px 24px;
     display: flex;
+    flex-wrap: wrap;
+    row-gap: 20px;
     align-items: flex-start;
 }
 
+/* Spacing alone, no divider rule: clusters wrap onto as many rows as the width allows, and a rule
+   would land at the start of a wrapped row with nothing to its left. */
 .mcCluster + .mcCluster {
-    border-left: 1px solid var(--grey-2);
     margin-left: 24px;
-    padding-left: 24px;
 }
 
 .mcClusterLabel {
@@ -678,6 +680,7 @@ table.mcAccessGrid tbody tr:hover td {
     letter-spacing: .04em;
 }
 
+.mcPasswordInput,
 .mcNewServerFields input,
 .mcNewServerFields select {
     padding: 6px 8px;
@@ -690,6 +693,13 @@ table.mcAccessGrid tbody tr:hover td {
     letter-spacing: 0;
     color: var(--text);
     min-width: 150px;
+}
+
+.mcPasswordInput {
+    /* Monospace so an O and a 0 in a password people have to retype can be told apart, and wide
+       enough for the 30 characters a generated one has, so reading it needs no scrolling. */
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    min-width: 270px;
 }
 
 .mcNewServerForm p {

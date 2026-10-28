@@ -4,6 +4,9 @@
 //Only drives which buttons render - the Lambda re-checks every request itself and is the real security
 //boundary.
 var mcIsAdmin = false;
+// Whether each server's join password is on screen rather than masked, by instance id. The table
+// rebuilds itself every few seconds, and the field's contents are carried across with it.
+var mcPasswordShown = {};
 
 var mcServerOptions = null;
 var mcServerOptionsPromise = null;
@@ -479,16 +482,17 @@ async function renderTable(data) {
     var previouslyActiveDetail = previouslySelectedRow && previouslySelectedRow.nextElementSibling;
     var previouslyActiveTabEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcTab.active');
     var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
-    // Same rebuild problem, applied to text being typed: without this, the refresh erases whatever is
-    // half-entered in the mod fields, and takes the caret with it.
-    var previousModInputs = ['.mcModRefInput', '.mcModGameVersionInput'].map(function (selector) {
+    // Same rebuild problem, applied to field contents: without this, the refresh erases whatever is
+    // half-entered or on screen, and takes the caret with it.
+    var previousInputs = ['.mcModRefInput', '.mcModGameVersionInput', '.mcPasswordInput'].map(function (selector) {
       var el = previouslyActiveDetail && previouslyActiveDetail.querySelector(selector);
       return {
         selector: selector,
         value: el ? el.value : '',
         focused: !!el && el === document.activeElement,
         start: el && el.selectionStart,
-        end: el && el.selectionEnd
+        end: el && el.selectionEnd,
+        scrollLeft: el ? el.scrollLeft : 0
       };
     });
 
@@ -511,6 +515,7 @@ async function renderTable(data) {
       var canDownload = mcCan(instance, 'download');
       var canContent = mcCan(instance, 'content');
       var canBackup = mcCan(instance, 'backup');
+      var canPassword = mcCan(instance, 'password');
       var canAutoShutdown = mcCan(instance, 'autoshutdown');
       var canResize = mcCan(instance, 'resize');
       var modsRunning = ec2State === 'running';
@@ -564,6 +569,7 @@ async function renderTable(data) {
               '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '') +
             // Grouped under Data, not Power: these act on the server's content, not its power state.
             (canContent ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
+        (canPassword ? mcPasswordClusterHtml() : '') +
         (canAutoShutdown ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
@@ -643,10 +649,58 @@ async function renderTable(data) {
 
       var modRefInput = detailRow.querySelector('.mcModRefInput');
       if (instanceId === previouslySelectedInstanceId) {
-        previousModInputs.forEach(function (previous) {
+        previousInputs.forEach(function (previous) {
           var el = detailRow.querySelector(previous.selector);
           if (el && previous.value) el.value = previous.value;
         });
+      }
+
+      var revealPasswordBtn = detailRow.querySelector('.mcRevealPasswordBtn');
+      if (revealPasswordBtn) {
+        var passwordInput = detailRow.querySelector('.mcPasswordInput');
+        var savePasswordBtn = detailRow.querySelector('.mcSavePasswordBtn');
+        //Only the open row's field keeps its contents, so a server left and come back to has an
+        //empty one, which cannot be on screen.
+        mcPasswordShown[instanceId] = !!mcPasswordShown[instanceId] && !!passwordInput.value;
+        mcShowPasswordState(instanceId, passwordInput, revealPasswordBtn);
+
+        revealPasswordBtn.onclick = async function (e) {
+          e.stopPropagation();
+          //Closing the panel masks the field, so the state has to be read at click time rather than
+          //when the row was drawn.
+          if (mcPasswordShown[instanceId]) {
+            mcPasswordShown[instanceId] = false;
+            mcShowPasswordState(instanceId, passwordInput, revealPasswordBtn);
+            return;
+          }
+          if (!passwordInput.value) {
+            revealPasswordBtn.disabled = true;
+            var password = await fetchGamePassword(instanceId);
+            revealPasswordBtn.disabled = false;
+            if (password === null) return;
+            var field = mcPasswordField(instanceId);
+            if (!field) return;
+            field.input.value = password;
+            mcPasswordShown[instanceId] = true;
+            mcShowPasswordState(instanceId, field.input, field.revealBtn);
+            return;
+          }
+          mcPasswordShown[instanceId] = true;
+          mcShowPasswordState(instanceId, passwordInput, revealPasswordBtn);
+        };
+
+        savePasswordBtn.onclick = async function (e) {
+          e.stopPropagation();
+          var password = passwordInput.value.trim();
+          if (!password) { showAlert('Type a new password first'); return; }
+          savePasswordBtn.disabled = true;
+          var saved = await saveGamePassword(instanceId, password);
+          savePasswordBtn.disabled = false;
+          if (saved === null) return;
+          var field = mcPasswordField(instanceId);
+          if (field) field.input.value = saved;
+          showAlert('Join password saved - restart the game to apply it');
+        };
       }
       var installModBtn = detailRow.querySelector('.mcInstallModBtn');
       if (installModBtn && !installModBtn.disabled) installModBtn.onclick = function (e) {
@@ -702,15 +756,20 @@ async function renderTable(data) {
         detailRow.classList.remove('hidden');
       }
 
-      // Must follow the appendChild calls above: .focus() is a silent no-op on a detached node.
+      // Must follow the appendChild calls above: .focus() is a silent no-op on a detached node, and a
+      // scroll offset means nothing until the field has been laid out.
       if (instanceId === previouslySelectedInstanceId) {
-        previousModInputs.forEach(function (previous) {
-          if (!previous.focused) return;
+        previousInputs.forEach(function (previous) {
           var el = detailRow.querySelector(previous.selector);
           if (!el) return;
-          el.focus();
-          //Put back where it was, or every refresh moves the caret to the end of the field.
-          el.setSelectionRange(previous.start, previous.end);
+          if (previous.focused) {
+            el.focus();
+            //Put back where it was, or every refresh moves the caret to the end of the field.
+            el.setSelectionRange(previous.start, previous.end);
+          }
+          //Restoring the text scrolls a field wider than its box to the end, and the caret alone
+          //doesn't bring it back.
+          el.scrollLeft = previous.scrollLeft;
         });
       }
 
@@ -723,6 +782,13 @@ async function renderTable(data) {
         });
       }
     });
+}
+
+function mcPasswordClusterHtml() {
+  return mcActionClusterHtml('Join Password',
+    '<input class="mcPasswordInput" type="password" autocomplete="off" placeholder="Join password">' +
+    '<button class="btn mcRevealPasswordBtn">Show</button>' +
+    '<button class="btn mcSavePasswordBtn">Save</button>');
 }
 
 function mcActionClusterHtml(label, buttonsHtml) {
@@ -742,7 +808,38 @@ function toggleServerRow(rowEl) {
   if (!wasSelected) {
     rowEl.classList.add('selected');
     detailRow.classList.remove('hidden');
+    // A closed panel keeps its row in the table, so without this a server opened again comes back on
+    // the tab it was left on, with its join password still on screen.
+    mcSwitchTab(detailRow, 'overview');
+    mcMaskPassword(rowEl.dataset.instanceId, detailRow);
   }
+}
+
+// mcMaskPassword puts a server's join password field back to how it starts: empty and masked.
+function mcMaskPassword(instanceId, detailRow) {
+  var input = detailRow.querySelector('.mcPasswordInput');
+  if (!input) return;
+  mcPasswordShown[instanceId] = false;
+  input.value = '';
+  mcShowPasswordState(instanceId, input, detailRow.querySelector('.mcRevealPasswordBtn'));
+}
+
+// mcPasswordField finds a server's join password controls as they are on the page now. A request can
+// outlast the rebuild that replaces the controls its click began with, and writing to a detached one
+// leaves nothing on screen.
+function mcPasswordField(instanceId) {
+  var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
+  var detailRow = row && row.nextElementSibling;
+  var input = detailRow && detailRow.querySelector('.mcPasswordInput');
+  if (!input) return null;
+  return { input: input, revealBtn: detailRow.querySelector('.mcRevealPasswordBtn') };
+}
+
+// mcShowPasswordState makes the field and its button agree with mcPasswordShown.
+function mcShowPasswordState(instanceId, input, revealBtn) {
+  var shown = !!mcPasswordShown[instanceId];
+  input.type = shown ? 'text' : 'password';
+  if (revealBtn) revealBtn.textContent = shown ? 'Hide' : 'Show';
 }
 
 function showAlert(text) {
@@ -820,6 +917,42 @@ async function resizeServer(size, instanceId) {
   for (y=0; y<5; y++){
     await sleep(1000);
     mcInfo(API_URL, jwt);
+  }
+}
+
+// An array answer is the [message, state] pair every other command uses: a refusal or a failure.
+async function fetchGamePassword(instanceId) {
+  var jwt = await getJwt();
+  try {
+    var res = await fetch(API_URL + 'gamepassword/' + query_string + '&instanceid=' + encodeURIComponent(instanceId), {
+      method: 'get',
+      headers: new Headers({ 'Authorization': jwt })
+    });
+    var data = await res.json();
+    if (Array.isArray(data)) { showAlert(data[0]); return null; }
+    return data.password || '';
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not read the join password');
+    return null;
+  }
+}
+
+async function saveGamePassword(instanceId, password) {
+  var jwt = await getJwt();
+  try {
+    var res = await fetch(API_URL + 'setgamepassword/' + query_string + '&instanceid=' + encodeURIComponent(instanceId), {
+      method: 'post',
+      headers: new Headers({ 'Authorization': jwt, 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ password: password })
+    });
+    var data = await res.json();
+    if (Array.isArray(data)) { showAlert(data[0]); return null; }
+    return data.password || '';
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not save the join password');
+    return null;
   }
 }
 

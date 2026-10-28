@@ -133,12 +133,11 @@ if [ ! -f "$MOUNT_POINT/serverconfig.json" ]; then
   #Running the server once and letting it time out is what writes a default serverconfig.json to patch.
   sudo -u vintagestory timeout 30 /home/vintagestory/server/VintagestoryServer --dataPath "$MOUNT_POINT" || true
 
-  VSPW=$(aws ssm get-parameter --name "game-password-$(cat /etc/game-server-manager/paramName.txt)" --with-decryption --query Parameter.Value --output text)
+  #No password here: apply_config.sh sets it before the game starts.
   sudo -u vintagestory jq \
     --argjson port "$VSPORT" \
     --arg name "$VSNAME" \
-    --arg pw "$VSPW" \
-    '.Port=$port | .ServerName=$name | .Password=$pw | .Upnp=false | .WhitelistMode=1 | .VerifyPlayerAuth=false' \
+    '.Port=$port | .ServerName=$name | .Upnp=false | .WhitelistMode=1 | .VerifyPlayerAuth=false' \
     "$MOUNT_POINT/serverconfig.json" | sudo -u vintagestory tee /tmp/serverconfig.json.tmp > /dev/null
   sudo -u vintagestory mv /tmp/serverconfig.json.tmp "$MOUNT_POINT/serverconfig.json"
 fi
@@ -188,7 +187,9 @@ sudo systemctl enable vintagestory-data.service
 sudo bash -c 'cat > /etc/systemd/system/vintagestory.service' <<EOF
 [Unit]
 Description=Vintage Story Dedicated Server
-After=network.target vintagestory-data.service
+After=network.target vintagestory-data.service vintagestory-config.service
+#A failed reconcile must not stop the game starting.
+Wants=vintagestory-config.service
 RequiresMountsFor=/home/vintagestory/data
 
 [Service]
@@ -206,7 +207,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory
 
-#Fetched from alongside this script, so it always matches the copy that served install.sh.
 sudo wget -O /home/vintagestory/status_agent.py "${BASEURL}/status_agent.py"
 COMPANION_SHA256=$(</etc/game-server-manager/companionSha256.txt)
 if [ -n "$COMPANION_SHA256" ]; then
@@ -236,6 +236,33 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory-status-agent
+
+sudo wget -O /home/vintagestory/apply_config.sh "${BASEURL}/apply_config.sh"
+APPLY_CONFIG_SHA256=$(</etc/game-server-manager/applyConfigSha256.txt)
+if [ -n "$APPLY_CONFIG_SHA256" ]; then
+  echo "${APPLY_CONFIG_SHA256}  /home/vintagestory/apply_config.sh" | sha256sum -c -
+fi
+sudo chmod +x /home/vintagestory/apply_config.sh
+
+sudo bash -c 'cat > /etc/systemd/system/vintagestory-config.service' <<EOF
+[Unit]
+Description=Reconcile Vintage Story config with the control panel (join password)
+#The password is read from Parameter Store, so the network has to be up.
+After=network-online.target vintagestory-data.service
+Wants=network-online.target
+RequiresMountsFor=/home/vintagestory/data
+
+[Service]
+Type=oneshot
+ExecStart=/home/vintagestory/apply_config.sh
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable vintagestory-config.service
 
 #Started as well as enabled: the volume is attached as the instance launches, so its device
 #was already active before this unit existed, and nothing pulls the unit in until the next

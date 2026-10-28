@@ -67,6 +67,30 @@ func (p *Provisioner) ensurePassword(ctx context.Context, serverID, inheritFrom 
 	return source, nil
 }
 
+// Password is the join password recorded for a server, which is the one its game enforces.
+func (p *Provisioner) Password(ctx context.Context, serverID string) (string, error) {
+	password, err := p.readPassword(ctx, serverID)
+	if err != nil {
+		return "", fmt.Errorf("reading the join password for %s: %w", serverID, err)
+	}
+	return password, nil
+}
+
+// SetPassword records a new join password. It takes effect when the game next starts; nothing here
+// touches the running server.
+func (p *Provisioner) SetPassword(ctx context.Context, serverID, password string) error {
+	_, err := p.ssm.PutParameter(ctx, &ssm.PutParameterInput{
+		Name:      aws.String(passwordName(serverID)),
+		Value:     aws.String(password),
+		Type:      ssmtypes.ParameterTypeSecureString,
+		Overwrite: aws.Bool(true),
+	})
+	if err != nil {
+		return fmt.Errorf("storing the join password for %s: %w", serverID, err)
+	}
+	return nil
+}
+
 func (p *Provisioner) readPassword(ctx context.Context, serverID string) (string, error) {
 	out, err := p.ssm.GetParameter(ctx, &ssm.GetParameterInput{
 		Name:           aws.String(passwordName(serverID)),

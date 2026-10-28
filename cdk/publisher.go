@@ -41,6 +41,7 @@ type ResolvedTemplate struct {
 	InstallScriptUrl       string  `json:"installScriptUrl"`
 	InstallSha256          string  `json:"installSha256"`
 	CompanionSha256        string  `json:"companionSha256"`
+	ApplyConfigSha256      string  `json:"applyConfigSha256"`
 	DataPath               string  `json:"dataPath"`
 	WorldDownloadPaths     string  `json:"worldDownloadPaths"`
 	WorldDownloadCorePaths string  `json:"worldDownloadCorePaths"`
@@ -73,6 +74,7 @@ func resolveTemplates(publisherOutputs map[string]string, securityGroupIds map[s
 			InstallScriptUrl:       base + "/" + t.InstallScript,
 			InstallSha256:          installSha,
 			CompanionSha256:        publisherOutputs[t.CompanionShaOutput],
+			ApplyConfigSha256:      publisherOutputs[t.ApplyConfigShaOutput],
 			DataPath:               t.DataPath,
 			WorldDownloadPaths:     t.WorldDownloadPaths,
 			WorldDownloadCorePaths: t.WorldDownloadCorePaths,

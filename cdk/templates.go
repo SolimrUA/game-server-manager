@@ -19,10 +19,11 @@ type GameTemplate struct {
 	// InstallScript is the path under the published scripts base URL. The script fetches its own
 	// companion from alongside itself, so both have to stay side by side wherever they are hosted.
 	InstallScript string
-	// InstallShaOutput and CompanionShaOutput name the asset publisher's outputs holding each script's
-	// digest. An instance verifies both before running them.
-	InstallShaOutput   string
-	CompanionShaOutput string
+	// These name the asset publisher's outputs holding each script's digest. An instance verifies
+	// every script against its digest before running it.
+	InstallShaOutput     string
+	CompanionShaOutput   string
+	ApplyConfigShaOutput string
 
 	// DataPath is where the server's data volume mounts. WorldDownloadPaths and WorldDownloadCorePaths
 	// are the subfolders of it that the two download actions include.
@@ -43,9 +44,10 @@ var GameTemplates = []GameTemplate{
 		DisplayName: "Valheim",
 		UdpPorts:    []PortRange{{From: 2456, To: 2458}},
 
-		InstallScript:      "Valheim/install.sh",
-		InstallShaOutput:   "ValheimInstallSha256",
-		CompanionShaOutput: "ValheimStatusAgentSha256",
+		InstallScript:        "Valheim/install.sh",
+		InstallShaOutput:     "ValheimInstallSha256",
+		CompanionShaOutput:   "ValheimStatusAgentSha256",
+		ApplyConfigShaOutput: "ValheimApplyConfigSha256",
 
 		DataPath:               "/usr/games/serverconfig/valheim",
 		WorldDownloadPaths:     "saves,server/BepInEx",
@@ -60,9 +62,10 @@ var GameTemplates = []GameTemplate{
 		TcpPorts:    []PortRange{{From: 42420, To: 42420}},
 		UdpPorts:    []PortRange{{From: 42420, To: 42420}},
 
-		InstallScript:      "VintageStory/install.sh",
-		InstallShaOutput:   "VintageStoryInstallSha256",
-		CompanionShaOutput: "VintageStoryStatusAgentSha256",
+		InstallScript:        "VintageStory/install.sh",
+		InstallShaOutput:     "VintageStoryInstallSha256",
+		CompanionShaOutput:   "VintageStoryStatusAgentSha256",
+		ApplyConfigShaOutput: "VintageStoryApplyConfigSha256",
 
 		DataPath:               "/home/vintagestory/data",
 		WorldDownloadPaths:     "Saves,Mods,Playerdata",

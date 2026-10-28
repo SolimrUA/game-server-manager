@@ -11,6 +11,10 @@ import (
 
 type valheim struct{}
 
+// applyConfigScript sets the recorded join password in the compose file, which the container reads
+// only as it starts.
+const applyConfigScript = "/usr/games/serverconfig/apply_config.sh"
+
 // composeFile is where the server's container is configured, which is also where its mod list lives.
 func (valheim) composeFile(dataPath string) string {
 	return dataPath + "/docker-compose.yml"
@@ -65,7 +69,9 @@ func (valheim) DeleteFailure(req ModRequest, stdout string) error {
 // discarded, so a restart that takes the server down and fails to bring it back says why.
 func (g valheim) Restart(dataPath string) ([]string, error) {
 	return []string{
-		`setsid sh -c "cd ` + remote.Quote(dataPath) + ` && docker compose down && docker compose up -d" </dev/null >/tmp/game-restart.log 2>&1 &`,
+		// A failed reconcile must not stop the restart.
+		`setsid sh -c "` + applyConfigScript + `; cd ` + remote.Quote(dataPath) +
+			` && docker compose down && docker compose up -d" </dev/null >/tmp/game-restart.log 2>&1 &`,
 	}, nil
 }
 

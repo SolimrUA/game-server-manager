@@ -17,6 +17,10 @@ type vintageStory struct{}
 // subcommand injects a line into the running server's console.
 const serverScript = "/home/vintagestory/server/server.sh"
 
+// vsApplyConfigScript sets the recorded join password in serverconfig.json, which the game reads
+// only as it starts.
+const vsApplyConfigScript = "/home/vintagestory/apply_config.sh"
+
 // modsSubdir mirrors status_agent.py's MODS_PATH.
 const modsSubdir = "Mods"
 
@@ -64,7 +68,9 @@ func (g vintageStory) Restart(string) ([]string, error) {
 	// Backgrounded because a restart takes longer than the control Lambda may wait for it. Logged to
 	// a file rather than discarded, so a restart that fails to bring the game back says why.
 	return []string{
-		`setsid sh -c "sudo -u vintagestory ` + serverScript + ` restart" </dev/null >/tmp/game-restart.log 2>&1 &`,
+		// A failed reconcile must not stop the restart.
+		`setsid sh -c "` + vsApplyConfigScript + `; sudo -u vintagestory ` + serverScript +
+			` restart" </dev/null >/tmp/game-restart.log 2>&1 &`,
 	}, nil
 }
 

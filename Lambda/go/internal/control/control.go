@@ -44,8 +44,9 @@ type Request struct {
 	SnapshotID   string `json:"snapshotId"`
 
 	Body struct {
-		Changes []access.Change `json:"changes"`
-		Names   []access.Name   `json:"names"`
+		Changes  []access.Change `json:"changes"`
+		Names    []access.Name   `json:"names"`
+		Password string          `json:"password"`
 	} `json:"body"`
 }
 
@@ -97,6 +98,9 @@ var commands = map[string]command{
 	"reSize": {needs: access.Resize, run: resize},
 
 	"backupNow": {needs: access.Backup, run: backupNow},
+
+	"getGamePassword": {needs: access.Password, run: gamePassword},
+	"setGamePassword": {needs: access.Password, run: setGamePassword},
 
 	"pauseIdleShutdown":  {needs: access.AutoShutdown, run: pauseIdleShutdown},
 	"resumeIdleShutdown": {needs: access.AutoShutdown, run: resumeIdleShutdown},

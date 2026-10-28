@@ -43,6 +43,9 @@ var Endpoints = []Endpoint{
 	{Path: "createserver", Command: "createServer",
 		Params: []string{"game", "serverid", "instancetype", "gameversion", "volumesize", "snapshotid"}},
 	{Path: "deleteserver", Command: "deleteServer", Params: []string{"instanceid"}},
+	{Path: "gamepassword", Command: "getGamePassword", Params: []string{"instanceid"}},
+	// POST keeps the password out of access logs and browser history.
+	{Path: "setgamepassword", Command: "setGamePassword", Params: []string{"instanceid"}, Post: true},
 	{Path: "access", Command: "getAccess"},
 	{Path: "saveaccess", Command: "saveAccess", Post: true},
 }

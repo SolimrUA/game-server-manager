@@ -33,6 +33,14 @@ sudo ./aws/install
 sudo apt install docker-ce docker-ce-cli containerd.io docker-compose-plugin -y
 sudo usermod -aG docker $USER
 
+#mikefarah/yq, which preserves the comments and the MODS block scalar in the compose file.
+YQ_VERSION=v4.44.3
+YQ_SHA256=a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7
+sudo curl -fsSL -o /usr/local/bin/yq \
+  "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c -
+sudo chmod +x /usr/local/bin/yq
+
 sudo mkdir -p /usr/games/serverconfig
 
 #The data volume is attached only after this script signals success, so a broken install fails fast
@@ -84,15 +92,6 @@ mountpoint -q "$MOUNT_POINT" || mount "$MOUNT_POINT"
 
 if [ ! -f "$MOUNT_POINT/docker-compose.yml" ]; then
   echo "No docker-compose.yml on this volume yet - bootstrapping a fresh one"
-  STACKNAME=$(</etc/game-server-manager/paramName.txt)
-  PARAMNAME=game-password-$STACKNAME
-
-  if VHPW=$(aws ssm get-parameter --name "$PARAMNAME" --with-decryption --query Parameter.Value --output text 2>/dev/null); then
-    echo "Reusing existing join password from $PARAMNAME"
-  else
-    VHPW=$(echo $RANDOM | md5sum | head -c 20)
-    aws ssm put-parameter --name "$PARAMNAME" --value "$VHPW" --type "SecureString" --overwrite
-  fi
 
   #The one file this script creates but never overwrites: mods (TYPE=BepInEx, MODS=...) and any manual
   #tuning live here and have no other home, so a redeploy onto the same volume must not clobber it.
@@ -116,7 +115,8 @@ services:
       - PORT=2456
       - NAME=MyAWSGamingServer
       - WORLD=Dedicated
-      - PASSWORD=$VHPW
+      #Set by apply_config.sh before the game starts.
+      - PASSWORD=
       - TZ=Europe/London
       - PUBLIC=1
       - AUTO_UPDATE=1
@@ -167,8 +167,10 @@ sudo systemctl enable valheim-data.service
 sudo bash -c 'cat > /etc/systemd/system/docker-compose-valheim.service' <<EOF
 [Unit]
 Description=Valheim Dedicated Server (docker compose)
-After=network.target docker.service valheim-data.service
+After=network.target docker.service valheim-data.service valheim-config.service
 Requires=docker.service
+#A failed reconcile must not stop the game starting.
+Wants=valheim-config.service
 RequiresMountsFor=/usr/games/serverconfig/valheim
 
 [Service]
@@ -189,7 +191,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable docker-compose-valheim.service
 
-#Fetched from alongside this script, so it always matches the copy that served install.sh.
 sudo wget -O /usr/games/serverconfig/status_agent.py "${BASEURL}/status_agent.py"
 COMPANION_SHA256=$(</etc/game-server-manager/companionSha256.txt)
 if [ -n "$COMPANION_SHA256" ]; then
@@ -218,6 +219,33 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable valheim-status-agent
+
+sudo wget -O /usr/games/serverconfig/apply_config.sh "${BASEURL}/apply_config.sh"
+APPLY_CONFIG_SHA256=$(</etc/game-server-manager/applyConfigSha256.txt)
+if [ -n "$APPLY_CONFIG_SHA256" ]; then
+  echo "${APPLY_CONFIG_SHA256}  /usr/games/serverconfig/apply_config.sh" | sha256sum -c -
+fi
+sudo chmod +x /usr/games/serverconfig/apply_config.sh
+
+sudo bash -c 'cat > /etc/systemd/system/valheim-config.service' <<EOF
+[Unit]
+Description=Reconcile Valheim config with the control panel (join password)
+#The password is read from Parameter Store, so the network has to be up.
+After=network-online.target valheim-data.service
+Wants=network-online.target
+RequiresMountsFor=/usr/games/serverconfig/valheim
+
+[Service]
+Type=oneshot
+ExecStart=/usr/games/serverconfig/apply_config.sh
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable valheim-config.service
 
 #Started as well as enabled: the volume is attached as the instance launches, so its device
 #was already active before this unit existed, and nothing pulls the unit in until the next

@@ -40,6 +40,7 @@ echo %[3]s > /etc/game-server-manager/paramName.txt
 echo %[4]s > /etc/game-server-manager/statusBucket.txt
 echo %[3]s > /etc/game-server-manager/statusKey.txt
 echo %[5]s > /etc/game-server-manager/companionSha256.txt
+echo %[9]s > /etc/game-server-manager/applyConfigSha256.txt
 echo %[6]s > /etc/game-server-manager/gameVersion.txt
 mkdir -p /usr/games/install
 cd /usr/games/install
@@ -61,6 +62,7 @@ func userData(req createRequest, template Template, urls installURLs, statusBuck
 		remote.Quote(req.GameVersion),
 		remote.Quote(template.InstallScriptURL),
 		template.InstallSha256,
+		remote.Quote(template.ApplyConfigSha256),
 	)
 }
 

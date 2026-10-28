@@ -80,7 +80,7 @@ cdk deploy
 This uploads your local files to `s3://<AssetBucketName>/<AssetKeyPrefix>/` and prints the outputs you'll need for the next two steps:
 
 - `ScriptsBaseUrl` - the base URL the published install scripts sit under.
-- `ValheimInstallSha256` / `ValheimStatusAgentSha256` / `VintageStoryInstallSha256` / `VintageStoryStatusAgentSha256` - SHA256 digests of each script's current content. A new server verifies each script it downloads against these before running it.
+- A `<Game>InstallSha256`, `<Game>StatusAgentSha256` and `<Game>ApplyConfigSha256` for each game - SHA256 digests of each script's current content. A new server verifies each script it downloads against these before running it.
 
 The Fleet stack reads these outputs at synth time, so re-run `cdk deploy` here whenever you change a
 game script, then deploy `cdk/` again to pick up the new digest.
@@ -123,12 +123,12 @@ Whichever game you create:
   result, and uploads the instance's own log on failure so you never need to reach the instance.
 - It stops itself once it's had no players for two consecutive 15-minute checks. Start it again from
   the control panel, which is also what creates or updates its DNS record.
-- Its join password is generated once and kept in SSM Parameter Store as a SecureString, keyed by
-  server id, so recreating a server under the same id reuses the password players already have:
-
-  ```bash
-  aws ssm get-parameter --name game-password-<server id> --with-decryption --query Parameter.Value --output text
-  ```
+- Its join password lives in SSM Parameter Store as a SecureString named `game-password-<server id>`.
+  The instance brings its game config into line with that parameter before the game starts, so the
+  parameter is the password the server enforces. Owners read and change it under **Join Password** in
+  the control panel; a new one applies the next time the game starts, which is what **Restart Game**
+  is for. A server recreated under the same id keeps its password, and one restored from another
+  server's snapshot inherits that server's.
 
 ### Rebuilding a server without losing its world
 

@@ -41,8 +41,10 @@ type ControlPanelDeployment struct {
 type ScriptHashes struct {
 	ValheimInstallSha256          string
 	ValheimStatusAgentSha256      string
+	ValheimApplyConfigSha256      string
 	VintageStoryInstallSha256     string
 	VintageStoryStatusAgentSha256 string
+	VintageStoryApplyConfigSha256 string
 }
 
 func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetPublisherStackProps) awscdk.Stack {
@@ -132,6 +134,12 @@ func NewAssetPublisherStack(scope constructs.Construct, id string, props *AssetP
 	awscdk.NewCfnOutput(stack, jsii.String("VintageStoryStatusAgentSha256"), &awscdk.CfnOutputProps{
 		Value: jsii.String(scriptHashes.VintageStoryStatusAgentSha256),
 	})
+	awscdk.NewCfnOutput(stack, jsii.String("ValheimApplyConfigSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.ValheimApplyConfigSha256),
+	})
+	awscdk.NewCfnOutput(stack, jsii.String("VintageStoryApplyConfigSha256"), &awscdk.CfnOutputProps{
+		Value: jsii.String(scriptHashes.VintageStoryApplyConfigSha256),
+	})
 
 	return stack
 }
@@ -209,6 +217,10 @@ func prepareAssets(config Config) (ScriptHashes, error) {
 	if err != nil {
 		return ScriptHashes{}, err
 	}
+	valheimApplyConfigHash, err := sha256File("../scripts/Valheim/apply_config.sh")
+	if err != nil {
+		return ScriptHashes{}, err
+	}
 	vsInstallHash, err := sha256File("../scripts/VintageStory/install.sh")
 	if err != nil {
 		return ScriptHashes{}, err
@@ -217,12 +229,18 @@ func prepareAssets(config Config) (ScriptHashes, error) {
 	if err != nil {
 		return ScriptHashes{}, err
 	}
+	vsApplyConfigHash, err := sha256File("../scripts/VintageStory/apply_config.sh")
+	if err != nil {
+		return ScriptHashes{}, err
+	}
 
 	return ScriptHashes{
 		ValheimInstallSha256:          valheimInstallHash,
 		ValheimStatusAgentSha256:      valheimStatusAgentHash,
+		ValheimApplyConfigSha256:      valheimApplyConfigHash,
 		VintageStoryInstallSha256:     vsInstallHash,
 		VintageStoryStatusAgentSha256: vsStatusAgentHash,
+		VintageStoryApplyConfigSha256: vsApplyConfigHash,
 	}, nil
 }
 
