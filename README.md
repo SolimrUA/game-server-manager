@@ -132,11 +132,11 @@ Whichever game you create:
 
 ### Rebuilding a server without losing its world
 
-Deleting a server from the control panel snapshots its data volume first and tags the snapshot with
-the server id, then terminates the instance. Creating a new server and choosing that snapshot under
-**Restore from** brings the world back - on a fresh instance, with whatever the current install script
-does. The snapshot is also how you take a server down while keeping its world for later, which is
-worth doing if you are near the server limit (`MAX_SERVERS`, 10 by default).
+Deleting a server terminates the instance and leaves its data volume behind. What brings a world back
+is a backup, so take one with **Backup Now** first unless the newest scheduled one is recent enough:
+creating a server and choosing a backup under **Restore from** rebuilds the world on a fresh instance,
+with whatever the current install script does. That is also how you take a server down while keeping
+its world, worth doing if you are near the server limit (`MAX_SERVERS`, 10 by default).
 
 A running server's data volume is independent of the instance: stopping, starting or resizing never
 touches it.

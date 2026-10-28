@@ -8,9 +8,10 @@ Create one from the control panel's **New server** form, picking Valheim - see t
 - A `valheim-status-agent` systemd service reports player count, version, and mods to the control panel
   (see [`docs/server-status.md`](server-status.md)) by shelling into the game's docker container:
   `docker compose exec valheim odin status --json`.
-- A `valheim-config.service` systemd unit sets `PASSWORD` in `docker-compose.yml` from the join
-  password the control panel holds, before the compose unit starts. A password that didn't take
-  effect is this unit's journal to check.
+- A `valheim-config.service` systemd unit sets `PASSWORD` and `NAME` in `docker-compose.yml` from what
+  the control panel holds, before the compose unit starts. There is no `NAME` entry until someone names
+  the server, which leaves the image's own default. A password or name that didn't take effect is this
+  unit's journal to check.
 - Valheim runs via `docker compose` (see [`scripts/Valheim/install.sh`](../scripts/Valheim/install.sh)
   for the generated `docker-compose.yml`). Mods such as ValheimPlus are configured through that file's
   `environment` section (`TYPE=BepInEx` and a `MODS=` list of Thunderstore package identifiers or

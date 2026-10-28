@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: MIT-0
 set -euo pipefail
 
-#Sets the join password the control panel recorded into serverconfig.json. The game reads its config
-#only as it starts, so this runs ahead of the game: at boot, and again on every restart.
+#Sets the join password and name the control panel recorded into serverconfig.json. The game reads
+#its config only as it starts, so this runs ahead of the game: at boot, and again on every restart.
 
 CONFIG=/home/vintagestory/data/serverconfig.json
-PARAM="game-password-$(</etc/game-server-manager/paramName.txt)"
+SERVER_ID=$(</etc/game-server-manager/paramName.txt)
+PARAM="game-password-$SERVER_ID"
+NAME_PARAM="game-servername-$SERVER_ID"
 
 if [ ! -f "$CONFIG" ]; then
   echo "no config at $CONFIG - nothing to reconcile"
@@ -31,3 +33,12 @@ sudo -u vintagestory jq --arg pw "$password" '.Password=$pw' "$CONFIG" \
 sudo -u vintagestory mv /tmp/serverconfig.json.tmp "$CONFIG"
 
 echo "join password reconciled from $PARAM"
+
+#No name parameter means nobody has named this server, which leaves the name the game has.
+if name=$(aws ssm get-parameter --name "$NAME_PARAM" --output json 2>/dev/null \
+  | jq -r '.Parameter.Value') && [ -n "$name" ]; then
+  sudo -u vintagestory jq --arg name "$name" '.ServerName=$name' "$CONFIG" \
+    | sudo -u vintagestory tee /tmp/serverconfig.json.tmp > /dev/null
+  sudo -u vintagestory mv /tmp/serverconfig.json.tmp "$CONFIG"
+  echo "name reconciled from $NAME_PARAM"
+fi

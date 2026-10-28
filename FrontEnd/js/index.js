@@ -239,7 +239,7 @@ var MC_DISK_WARN_FRACTION = 0.15;
 
 // Reported one disk at a time, because which one is short decides the fix: a full data volume needs
 // a resize or a clear-out, a full root is usually logs or docker images.
-var MC_DISK_LABELS = [['data', 'Data'], ['root', 'Root']];
+var MC_DISK_LABELS = [['root', 'Root'], ['data', 'Data']];
 
 function mcDiskParts(disk) {
   var parts = [];
@@ -253,8 +253,8 @@ function mcDiskParts(disk) {
 
 function mcDiskText(disk) {
   var text = mcDiskParts(disk).map(function (p) {
-    return p.label + ' ' + p.free.toFixed(1) + ' / ' + p.total.toFixed(1) + ' GiB free';
-  }).join(' \u00b7 ');
+    return p.label + ' ' + Math.round(p.fraction * 100) + '%';
+  }).join(', ');
   return text ? escapeHtml(text) : '\u2014';
 }
 
@@ -484,7 +484,8 @@ async function renderTable(data) {
     var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
     // Same rebuild problem, applied to field contents: without this, the refresh erases whatever is
     // half-entered or on screen, and takes the caret with it.
-    var previousInputs = ['.mcModRefInput', '.mcModGameVersionInput', '.mcPasswordInput'].map(function (selector) {
+    var previousInputs = ['.mcModRefInput', '.mcModGameVersionInput', '.mcPasswordInput',
+      '.mcServerNameInput'].map(function (selector) {
       var el = previouslyActiveDetail && previouslyActiveDetail.querySelector(selector);
       return {
         selector: selector,
@@ -536,7 +537,8 @@ async function renderTable(data) {
           (dns !== '—' ? '<span class="mcCopyDns">' + MC_COPY_ICON_SVG + '</span>' : '') +
         '</span></td>' +
         '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
-        '<td class="mcMuted">—</td>' +
+        '<td' + (instance['ServerName'] ? '>' : ' class="mcMuted">') +
+          escapeHtml(instance['ServerName'] || '—') + '</td>' +
         '<td><span class="mcBadge ' + combinedState.badgeClass + '">' + escapeHtml(combinedState.text) + '</span>' + mcDiskWarnHtml(instance) + '</td>' +
         '<td>' + playersText + '</td>' +
         '<td>' + lastSaveText + '</td>' +
@@ -570,23 +572,24 @@ async function renderTable(data) {
             // Grouped under Data, not Power: these act on the server's content, not its power state.
             (canContent ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
         (canPassword ? mcPasswordClusterHtml() : '') +
+        (canContent ? mcServerNameClusterHtml(instance['ServerName']) : '') +
         (canAutoShutdown ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
             '<span class="mcMuted">Auto-shutdown: ' + escapeHtml(idleStatus.text) + '</span>') : '') +
         (mcIsAdmin ?
           mcActionClusterHtml('Server',
-            '<button type="button" class="btn mcDeleteServerBtn">Delete Server</button>') : '');
+            '<button type="button" class="btn danger mcDeleteServerBtn">Delete Server</button>') : '');
 
       var overviewHtml =
         mcKvHtml('Game', mcGameDisplayName(instance['GameName'])) +
-        mcKvHtml('Server Name', '—') +
+        mcKvHtml('Server Name', escapeHtml(instance['ServerName'] || '—')) +
         mcKvHtml('EC2 State', escapeHtml(ec2State || '—')) +
         mcKvHtml('Game State', escapeHtml(gameStatus.text)) +
         mcKvHtml('Auto-Shutdown', escapeHtml(idleStatus.text)) +
         mcKvHtml('Players', playersText) +
         mcKvHtml('Last Save', lastSaveText) +
-        mcKvHtml('Disk', mcDiskText(status && status.disk)) +
+        mcKvHtml('Free disk space', mcDiskText(status && status.disk)) +
         mcKvHtml('Type', escapeHtml(instance['InstanceType'] || '—')) +
         mcKvHtml('IP Address', escapeHtml(instance['PublicIpAddress'] || '—')) +
         mcKvHtml('Version', versionText) +
@@ -702,6 +705,24 @@ async function renderTable(data) {
           showAlert('Join password saved - restart the game to apply it');
         };
       }
+
+      var saveServerNameBtn = detailRow.querySelector('.mcSaveServerNameBtn');
+      if (saveServerNameBtn) {
+        var serverNameInput = detailRow.querySelector('.mcServerNameInput');
+        saveServerNameBtn.onclick = async function (e) {
+          e.stopPropagation();
+          var name = serverNameInput.value.trim();
+          if (!name) { showAlert("Type a new server name - a server's name can't be removed"); return; }
+          saveServerNameBtn.disabled = true;
+          var saved = await saveServerName(instanceId, name);
+          saveServerNameBtn.disabled = false;
+          if (saved === null) return;
+          //The request can outlast the rebuild that replaces this field, so it is looked up again.
+          var live = mcServerNameField(instanceId);
+          if (live) live.value = '';
+          showAlert('Server name saved - restart the game to apply it');
+        };
+      }
       var installModBtn = detailRow.querySelector('.mcInstallModBtn');
       if (installModBtn && !installModBtn.disabled) installModBtn.onclick = function (e) {
         e.stopPropagation();
@@ -784,6 +805,14 @@ async function renderTable(data) {
     });
 }
 
+// The field is for the new name; the placeholder carries the one in force.
+function mcServerNameClusterHtml(currentName) {
+  return mcActionClusterHtml('Server Name',
+    '<input class="mcServerNameInput" maxlength="64" autocomplete="off" placeholder="' +
+      escapeHtml(currentName || 'Server name') + '">' +
+    '<button class="btn mcSaveServerNameBtn">Save</button>');
+}
+
 function mcPasswordClusterHtml() {
   return mcActionClusterHtml('Join Password',
     '<input class="mcPasswordInput" type="password" autocomplete="off" placeholder="Join password">' +
@@ -822,6 +851,13 @@ function mcMaskPassword(instanceId, detailRow) {
   mcPasswordShown[instanceId] = false;
   input.value = '';
   mcShowPasswordState(instanceId, input, detailRow.querySelector('.mcRevealPasswordBtn'));
+}
+
+// mcServerNameField finds a server's name field as it is on the page now.
+function mcServerNameField(instanceId) {
+  var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
+  var detailRow = row && row.nextElementSibling;
+  return detailRow && detailRow.querySelector('.mcServerNameInput');
 }
 
 // mcPasswordField finds a server's join password controls as they are on the page now. A request can
@@ -934,6 +970,24 @@ async function fetchGamePassword(instanceId) {
   } catch (e) {
     console.log(e);
     showAlert('Could not read the join password');
+    return null;
+  }
+}
+
+async function saveServerName(instanceId, name) {
+  var jwt = await getJwt();
+  try {
+    var res = await fetch(API_URL + 'setservername/' + query_string + '&instanceid=' + encodeURIComponent(instanceId), {
+      method: 'post',
+      headers: new Headers({ 'Authorization': jwt, 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ serverName: name })
+    });
+    var data = await res.json();
+    if (Array.isArray(data)) { showAlert(data[0]); return null; }
+    return data.serverName || '';
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not save the server name');
     return null;
   }
 }

@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: MIT-0
 set -euo pipefail
 
-#Sets the join password the control panel recorded into the compose file. The container reads
-#PASSWORD only as it starts, so this runs ahead of the game: at boot, and again on every restart.
+#Sets the join password and name the control panel recorded into the compose file. The container
+#reads them only as it starts, so this runs ahead of the game: at boot, and again on every restart.
 
 COMPOSE=/usr/games/serverconfig/valheim/docker-compose.yml
-PARAM="game-password-$(</etc/game-server-manager/paramName.txt)"
+SERVER_ID=$(</etc/game-server-manager/paramName.txt)
+PARAM="game-password-$SERVER_ID"
+NAME_PARAM="game-servername-$SERVER_ID"
 
 if [ ! -f "$COMPOSE" ]; then
   echo "no compose file at $COMPOSE - nothing to reconcile"
@@ -37,3 +39,15 @@ if [ "$applied" != "$password" ]; then
 fi
 
 echo "join password reconciled from $PARAM"
+
+#No name parameter means nobody has named this server, which leaves the image's own default.
+if name=$(aws ssm get-parameter --name "$NAME_PARAM" --output json 2>/dev/null \
+  | yq -p json -oy -r '.Parameter.Value' -) && [ -n "$name" ]; then
+  #A compose file without a NAME entry gets one.
+  NAME="$name" yq -i \
+    '(.services.valheim.environment[] | select(. == "NAME=*")) = "NAME=" + strenv(NAME)' \
+    "$COMPOSE"
+  yq '.services.valheim.environment[] | select(. == "NAME=*")' "$COMPOSE" | grep -q . \
+    || NAME="$name" yq -i '.services.valheim.environment += ["NAME=" + strenv(NAME)]' "$COMPOSE"
+  echo "name reconciled from $NAME_PARAM"
+fi

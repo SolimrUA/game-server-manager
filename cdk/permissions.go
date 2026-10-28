@@ -169,10 +169,12 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ssm:%s::parameter%s", region, config.AmiParameter)),
 	})
 	// A new server's join password is written here before it boots, and read back to carry the password
-	// of the server a backup was taken from.
+	// of the server a backup was taken from. A server's name is written here when someone renames it.
 	add(&awsiam.PolicyStatementProps{
-		Actions:   jsii.Strings("ssm:PutParameter", "ssm:GetParameter"),
-		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-password-*", region, account)),
+		Actions: jsii.Strings("ssm:PutParameter", "ssm:GetParameter"),
+		Resources: jsii.Strings(
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-password-*", region, account),
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-servername-*", region, account)),
 	})
 
 	add(&awsiam.PolicyStatementProps{

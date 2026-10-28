@@ -74,8 +74,9 @@ func addServerRole(stack awscdk.Stack, statusBucketName *string) awsiam.Instance
 
 	role.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
 		Actions: jsii.Strings("ssm:GetParameter", "ssm:PutParameter"),
-		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-password-*",
-			*stack.Region(), *stack.Account())),
+		Resources: jsii.Strings(
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-password-*", *stack.Region(), *stack.Account()),
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-servername-*", *stack.Region(), *stack.Account())),
 	}))
 	role.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
 		Actions: jsii.Strings("s3:PutObject"),

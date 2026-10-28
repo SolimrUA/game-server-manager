@@ -19,6 +19,8 @@ SPDX-License-Identifier: MIT-0
     --grey-2: #E4E7EB;
     --grey-3: #8A94A6;
     --dark: #1B2430;
+    --red: #C0392B;
+    --red-dark: #96281B;
     --text: #1B2430;
     --white: #FFFFFF;
 }
@@ -190,6 +192,16 @@ ul.top-nav li.dropdownIcon {
 
 .btn.start:hover {
     background: var(--cyan-dark);
+}
+
+.btn.danger {
+    background: var(--red);
+    color: var(--white);
+    border-color: var(--red);
+}
+
+.btn.danger:hover {
+    background: var(--red-dark);
 }
 
 .btn:disabled,

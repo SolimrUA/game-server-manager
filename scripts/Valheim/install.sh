@@ -113,9 +113,9 @@ services:
       - 2458:2458/udp
     environment:
       - PORT=2456
-      - NAME=MyAWSGamingServer
       - WORLD=Dedicated
-      #Set by apply_config.sh before the game starts.
+      #Both set by apply_config.sh before the game starts. No NAME entry until someone names the
+      #server, which leaves the image's own default.
       - PASSWORD=
       - TZ=Europe/London
       - PUBLIC=1
@@ -229,7 +229,7 @@ sudo chmod +x /usr/games/serverconfig/apply_config.sh
 
 sudo bash -c 'cat > /etc/systemd/system/valheim-config.service' <<EOF
 [Unit]
-Description=Reconcile Valheim config with the control panel (join password)
+Description=Reconcile Valheim config with the control panel (join password, name)
 #The password is read from Parameter Store, so the network has to be up.
 After=network-online.target valheim-data.service
 Wants=network-online.target

@@ -246,7 +246,7 @@ sudo chmod +x /home/vintagestory/apply_config.sh
 
 sudo bash -c 'cat > /etc/systemd/system/vintagestory-config.service' <<EOF
 [Unit]
-Description=Reconcile Vintage Story config with the control panel (join password)
+Description=Reconcile Vintage Story config with the control panel (join password, name)
 #The password is read from Parameter Store, so the network has to be up.
 After=network-online.target vintagestory-data.service
 Wants=network-online.target
