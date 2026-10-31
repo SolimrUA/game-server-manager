@@ -46,6 +46,7 @@ type Request struct {
 	Body struct {
 		Changes    []access.Change `json:"changes"`
 		Names      []access.Name   `json:"names"`
+		Permits    []PermitChange  `json:"permits"`
 		Password   string          `json:"password"`
 		ServerName string          `json:"serverName"`
 	} `json:"body"`
@@ -55,6 +56,9 @@ type Request struct {
 // control panel can redraw itself from any response.
 type Info struct {
 	Instances []server.Server `json:"Instances"`
+	// CanCreateServer tells the control panel whether to offer the New server form. An admin always
+	// may; anyone else holds a permit that creating a server spends.
+	CanCreateServer bool `json:"CanCreateServer"`
 }
 
 // caller is who is asking, and what they may do.
@@ -64,6 +68,8 @@ type caller struct {
 	// roles is the access template each server grants this caller, by server id. Empty for an admin,
 	// who holds everything on every server.
 	roles map[string]string
+	// canCreate is a permission to create one server, which creating it spends.
+	canCreate bool
 }
 
 // run carries out a command. servers is what the caller may act on: the one they named, or all of
@@ -72,13 +78,15 @@ type run func(ctx context.Context, h *Handler, req Request, servers []server.Ser
 
 // command is one thing the control panel can ask for, and who may ask for it.
 //
-// Exactly one of adminOnly, needs or openToAll has to be set. The table is checked at startup, so a
-// command added without saying who may run it stops the function from starting rather than
-// defaulting to something permissive.
+// Exactly one of adminOnly, mayCreate, needs or openToAll has to be set. The table is checked at
+// startup, so a command added without saying who may run it stops the function from starting rather
+// than defaulting to something permissive.
 type command struct {
 	// adminOnly is for commands that manage the fleet itself rather than one server, which no access
 	// template can grant.
 	adminOnly bool
+	// mayCreate is for the commands a create permit opens up, which an admin may always run.
+	mayCreate bool
 	// needs is the capability a caller must hold on the server they named.
 	needs access.Capability
 	// openToAll is for commands that reveal nothing beyond what the caller can already see.
@@ -115,8 +123,8 @@ var commands = map[string]command{
 	"startWorldDownload":     {needs: access.Download, run: startWorldDownload},
 	"getWorldDownloadStatus": {needs: access.Download, run: worldDownloadStatus},
 
-	"getServerOptions": {adminOnly: true, fleetWide: true, run: serverOptions},
-	"createServer":     {adminOnly: true, fleetWide: true, run: createServer},
+	"getServerOptions": {mayCreate: true, fleetWide: true, run: serverOptions},
+	"createServer":     {mayCreate: true, fleetWide: true, run: createServer},
 	"deleteServer":     {adminOnly: true, run: deleteServer},
 
 	"getAccess":  {adminOnly: true, fleetWide: true, run: getAccess},
@@ -126,13 +134,13 @@ var commands = map[string]command{
 func init() {
 	for name, c := range commands {
 		set := 0
-		for _, declared := range []bool{c.adminOnly, c.needs != "", c.openToAll} {
+		for _, declared := range []bool{c.adminOnly, c.mayCreate, c.needs != "", c.openToAll} {
 			if declared {
 				set++
 			}
 		}
 		if set != 1 {
-			panic(fmt.Sprintf("command %q must declare exactly one of adminOnly, needs or openToAll", name))
+			panic(fmt.Sprintf("command %q must declare exactly one of adminOnly, mayCreate, needs or openToAll", name))
 		}
 		if c.run == nil {
 			panic(fmt.Sprintf("command %q has nothing to run", name))
@@ -160,7 +168,7 @@ func (h *Handler) Handle(ctx context.Context, req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	info := Info{Instances: servers}
+	info := Info{Instances: servers, CanCreateServer: who.isAdmin || who.canCreate}
 
 	if len(servers) == 0 && !c.fleetWide {
 		// With access filtering, "nothing to show" is an ordinary state for a caller who hasn't been
@@ -205,12 +213,13 @@ func (h *Handler) who(ctx context.Context, req Request) (caller, error) {
 		return who, nil
 	}
 
-	roles, err := h.grants.RolesFor(ctx, req.Sub)
+	roles, canCreate, err := h.grants.RolesFor(ctx, req.Sub)
 	if err != nil {
 		// Reading no grants is indistinguishable from holding none, and holding none is safe.
 		log.Printf("couldn't read access for %s: %v", req.Sub, err)
 	}
 	who.roles = roles
+	who.canCreate = canCreate
 	return who, nil
 }
 
@@ -234,6 +243,12 @@ func authorize(c command, who caller, targets []server.Server) error {
 	}
 	if c.adminOnly {
 		return usererr.New("You don't have permission to manage servers or access")
+	}
+	if c.mayCreate {
+		if !who.canCreate {
+			return usererr.New("You don't have permission to create a server")
+		}
+		return nil
 	}
 
 	// The capability is read from the server's own entry, which was built from the caller's grants -

@@ -4,6 +4,9 @@
 //Only drives which buttons render - the Lambda re-checks every request itself and is the real security
 //boundary.
 var mcIsAdmin = false;
+// Whether this caller may create a server, which every reply reports. A permit is spent by the
+// server it creates, so this turns itself off.
+var mcCanCreateServer = false;
 // Whether each server's join password is on screen rather than masked, by instance id. The table
 // rebuilds itself every few seconds, and the field's contents are carried across with it.
 var mcPasswordShown = {};
@@ -97,6 +100,22 @@ function renderNewServerForm() {
   f.game.onchange = mcSyncNewServerForm;
   f.reuse.onchange = mcSyncNewServerForm;
   mcSyncNewServerForm();
+}
+
+// mcSetCanCreateServer shows or hides the New server button, and closes the form behind it when the
+// permission goes away - which is what spending a permit on a server looks like here.
+function mcSetCanCreateServer(canCreate) {
+  if (canCreate === mcCanCreateServer) return;
+  mcCanCreateServer = canCreate;
+
+  var button = document.getElementById('mcNewServerBtn');
+  if (button) button.style.display = canCreate ? '' : 'none';
+  if (canCreate) {
+    mcLoadServerOptions().catch(function (e) { console.log(e); });
+    return;
+  }
+  mcForgetServerOptions();
+  toggleNewServerForm(false);
 }
 
 async function toggleNewServerForm(show) {
@@ -474,6 +493,7 @@ function mcInstallModFormHtml(gameName, enabled, gameVersion) {
 
 async function renderTable(data) {
     var instances = (data && data[1] && data[1]["Instances"]) || [];
+    mcSetCanCreateServer(!!(data && data[1] && data[1]["CanCreateServer"]));
     var tbody = document.getElementById('mcServerTableBody');
     var previouslySelectedRow = tbody.querySelector('tr.mcServerRow.selected');
     var previouslySelectedInstanceId = previouslySelectedRow ? previouslySelectedRow.dataset.instanceId : null;
@@ -1238,15 +1258,14 @@ function updateAccessLink() {
   if (access) access.style.display = mcIsAdmin ? '' : 'none';
 }
 
-//Creating a server is admin-only, so the button appears once the group membership is known.
+//The button stays hidden until a reply says this caller may create a server, so the handlers are
+//wired whether or not they ever can.
 function mcWireNewServerForm() {
   var button = document.getElementById('mcNewServerBtn');
   if (!button) return;
-  button.style.display = mcIsAdmin ? '' : 'none';
-  if (!mcIsAdmin) return;
+  button.style.display = 'none';
 
   var f = mcServerOptionsForm();
-  mcLoadServerOptions().catch(function (e) { console.log(e); });
   button.onclick = function () {
     toggleNewServerForm(f.form.style.display === 'none');
   };

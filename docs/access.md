@@ -12,7 +12,7 @@ it for everyone holding it.
 | Template | Capabilities |
 |---|---|
 | Player | `view`, `lifecycle`, `download` |
-| Owner | `view`, `lifecycle`, `download`, `content`, `backup` |
+| Owner | `view`, `lifecycle`, `download`, `content`, `backup`, `password` |
 | Admin (the `admins` Cognito group) | all of the above, plus `autoshutdown` and `resize` |
 
 Admin is a group rather than a template: it applies to every server at once and can't be assigned per
@@ -25,19 +25,33 @@ server. `autoshutdown` and `resize` are admin-only because they change what the 
 | `download` | `startWorldDownload`, `getWorldDownloadStatus` |
 | `content` | `installMod`, `deleteMod`, `restartGame`, `updateGame`, `setServerName` |
 | `backup` | `backupNow` |
+| `password` | `getGamePassword`, `setGamePassword` |
 | `autoshutdown` | `pauseIdleShutdown`, `resumeIdleShutdown` |
 | `resize` | `reSize` |
 
 ## Where assignments live
 
 One DynamoDB item per user per server, in the table the Control Panel stack creates
-([`cdk/controlpanel.go`](../cdk/controlpanel.go)): partition key `userSub`, sort key `instanceId`, and a
+([`cdk/controlpanel.go`](../cdk/controlpanel.go)): partition key `userSub`, sort key `serverId`, and a
 `role` attribute holding the template name. No item means no access, so revoking deletes the item and
 the table only ever holds real grants.
 
 Users themselves are only ever in Cognito. The table holds no copy of them beyond an `email` on each item
 for readability, and a user's display name is Cognito's own `name` attribute - a standard optional
 attribute, which is why storing one needs no change to the pool's schema.
+
+## Creating a server
+
+Creating a server is an admin's to do, except that an admin can tick **May create** against a user on
+the Access page. That lets them create one server: creating it spends the permission and makes them its
+Owner. Deleting stays with admins, so the server outlives the permit until an admin removes it.
+
+The permission is an item in the same table under the sort key `#create-permit`, with a `canCreate`
+attribute. It is spent with a conditional update, so two requests at once cannot both spend the same
+one.
+
+Such a user sees the **Restore from** list narrowed to servers they already hold access to, because
+restoring a backup copies that world onto a server they would then own.
 
 ## How a request is authorised
 

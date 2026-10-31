@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,6 +21,8 @@ const (
 // DynamoDB is the grants table.
 type DynamoDB interface {
 	Query(context.Context, *dynamodb.QueryInput, ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
+	PutItem(context.Context, *dynamodb.PutItemInput, ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
+	UpdateItem(context.Context, *dynamodb.UpdateItemInput, ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
 	Scan(context.Context, *dynamodb.ScanInput, ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error)
 	BatchWriteItem(context.Context, *dynamodb.BatchWriteItemInput, ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
 }
@@ -41,11 +44,11 @@ type Grant struct {
 	Role     string `json:"role"`
 }
 
-// RolesFor returns the template each server grants this caller, keyed by server id. One query serves
-// a whole request.
-func (s *Store) RolesFor(ctx context.Context, userSub string) (map[string]string, error) {
+// RolesFor returns the template each server grants this caller, keyed by server id, and whether they
+// may create a server. One query serves a whole request: the permit is an item in the same partition.
+func (s *Store) RolesFor(ctx context.Context, userSub string) (map[string]string, bool, error) {
 	if s.table == "" || userSub == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	out, err := s.db.Query(ctx, &dynamodb.QueryInput{
@@ -54,14 +57,19 @@ func (s *Store) RolesFor(ctx context.Context, userSub string) (map[string]string
 		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":sub": &ddbtypes.AttributeValueMemberS{Value: userSub}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reading access for %s: %w", userSub, err)
+		return nil, false, fmt.Errorf("reading access for %s: %w", userSub, err)
 	}
 
 	roles := make(map[string]string, len(out.Items))
+	canCreate := false
 	for _, item := range out.Items {
-		roles[stringAttr(item, keyServer)] = stringAttr(item, "role")
+		if server := stringAttr(item, keyServer); server == permitKey {
+			canCreate = boolAttr(item, permitAttr)
+		} else {
+			roles[server] = stringAttr(item, "role")
+		}
 	}
-	return roles, nil
+	return roles, canCreate, nil
 }
 
 // All returns every grant, for the access page.
@@ -78,6 +86,11 @@ func (s *Store) All(ctx context.Context) ([]Grant, error) {
 			return nil, fmt.Errorf("scanning access grants: %w", err)
 		}
 		for _, item := range page.Items {
+			// The permit shares the table but is not access to a server, and the access page's grid
+			// would otherwise show it as one.
+			if stringAttr(item, keyServer) == permitKey {
+				continue
+			}
 			grants = append(grants, Grant{
 				UserSub:  stringAttr(item, keyUserSub),
 				ServerID: stringAttr(item, keyServer),
@@ -173,4 +186,100 @@ func stringAttr(item map[string]ddbtypes.AttributeValue, name string) string {
 		return value.Value
 	}
 	return ""
+}
+
+// permitKey is the sort key of the item holding a user's permission to create one server. A server id
+// can hold no '#', so this can never collide with one.
+const permitKey = "#create-permit"
+
+const permitAttr = "canCreate"
+
+// Permits reports which users may create a server, keyed by sub. Only users holding one appear.
+func (s *Store) Permits(ctx context.Context) (map[string]bool, error) {
+	if s.table == "" {
+		return nil, nil
+	}
+
+	permits := map[string]bool{}
+	pages := dynamodb.NewScanPaginator(s.db, &dynamodb.ScanInput{
+		TableName:                 aws.String(s.table),
+		FilterExpression:          aws.String(keyServer + " = :key"),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":key": &ddbtypes.AttributeValueMemberS{Value: permitKey}},
+	})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scanning create permits: %w", err)
+		}
+		for _, item := range page.Items {
+			if boolAttr(item, permitAttr) {
+				permits[stringAttr(item, keyUserSub)] = true
+			}
+		}
+	}
+	return permits, nil
+}
+
+// SetPermit gives a user permission to create one server, or takes it back.
+func (s *Store) SetPermit(ctx context.Context, userSub string, allowed bool, callerSub string) error {
+	if s.table == "" {
+		return fmt.Errorf("access storage isn't configured")
+	}
+	if userSub == "" {
+		return fmt.Errorf("a permit change was missing its user")
+	}
+
+	item := map[string]ddbtypes.AttributeValue{
+		keyUserSub: &ddbtypes.AttributeValueMemberS{Value: userSub},
+		keyServer:  &ddbtypes.AttributeValueMemberS{Value: permitKey},
+		permitAttr: &ddbtypes.AttributeValueMemberBOOL{Value: allowed},
+		"updatedAt": &ddbtypes.AttributeValueMemberS{
+			Value: time.Now().UTC().Format(time.RFC3339)},
+	}
+	if callerSub != "" {
+		item["updatedBy"] = &ddbtypes.AttributeValueMemberS{Value: callerSub}
+	}
+
+	_, err := s.db.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String(s.table), Item: item})
+	if err != nil {
+		return fmt.Errorf("storing the create permit for %s: %w", userSub, err)
+	}
+	return nil
+}
+
+// ConsumePermit spends a user's permission to create a server, and reports whether they had one.
+// The condition is what stops two requests at once from spending the same permit twice.
+func (s *Store) ConsumePermit(ctx context.Context, userSub string) (bool, error) {
+	if s.table == "" {
+		return false, fmt.Errorf("access storage isn't configured")
+	}
+
+	_, err := s.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(s.table),
+		Key: map[string]ddbtypes.AttributeValue{
+			keyUserSub: &ddbtypes.AttributeValueMemberS{Value: userSub},
+			keyServer:  &ddbtypes.AttributeValueMemberS{Value: permitKey},
+		},
+		UpdateExpression:    aws.String("SET " + permitAttr + " = :no"),
+		ConditionExpression: aws.String(permitAttr + " = :yes"),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+			":no":  &ddbtypes.AttributeValueMemberBOOL{Value: false},
+			":yes": &ddbtypes.AttributeValueMemberBOOL{Value: true},
+		},
+	})
+	var unmet *ddbtypes.ConditionalCheckFailedException
+	if errors.As(err, &unmet) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("spending the create permit for %s: %w", userSub, err)
+	}
+	return true, nil
+}
+
+func boolAttr(item map[string]ddbtypes.AttributeValue, name string) bool {
+	if value, ok := item[name].(*ddbtypes.AttributeValueMemberBOOL); ok {
+		return value.Value
+	}
+	return false
 }

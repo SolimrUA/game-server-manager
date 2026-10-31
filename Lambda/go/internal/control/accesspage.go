@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 
 	"personal-game-server-manager/lambda/internal/access"
 	"personal-game-server-manager/lambda/internal/server"
@@ -14,6 +15,8 @@ type AccessPage struct {
 	Users   []access.User  `json:"users"`
 	Servers []AccessServer `json:"servers"`
 	Grants  []access.Grant `json:"grants"`
+	// Permits holds the sub of every user who may create a server.
+	Permits []string `json:"permits"`
 }
 
 // AccessServer is a server as something to grant access to. Grants are keyed on the server id, so
@@ -59,7 +62,17 @@ func getAccess(ctx context.Context, h *Handler, _ Request, servers []server.Serv
 		})
 	}
 
-	return AccessPage{Users: users, Servers: grantable, Grants: grants}, nil
+	permits, err := h.grants.Permits(ctx)
+	if err != nil {
+		log.Printf("couldn't read the create permits: %v", err)
+	}
+	holders := make([]string, 0, len(permits))
+	for sub := range permits {
+		holders = append(holders, sub)
+	}
+	sort.Strings(holders)
+
+	return AccessPage{Users: users, Servers: grantable, Grants: grants, Permits: holders}, nil
 }
 
 func saveAccess(ctx context.Context, h *Handler, req Request, _ []server.Server) (any, error) {
@@ -69,6 +82,16 @@ func saveAccess(ctx context.Context, h *Handler, req Request, _ []server.Server)
 	}
 
 	saved := fmt.Sprintf("Saved access for %d server/user %s", len(changes), plural(len(changes), "pair"))
+
+	for _, permit := range req.Body.Permits {
+		if err := h.grants.SetPermit(ctx, permit.UserSub, permit.CanCreate, req.Sub); err != nil {
+			return nil, err
+		}
+	}
+	if len(req.Body.Permits) > 0 {
+		saved += fmt.Sprintf(", and changed who may create a server for %d %s",
+			len(req.Body.Permits), plural(len(req.Body.Permits), "user"))
+	}
 
 	renamed, err := h.directory.Rename(ctx, req.Body.Names)
 	if err != nil {
@@ -85,4 +108,10 @@ func plural(count int, word string) string {
 		return word
 	}
 	return word + "s"
+}
+
+// PermitChange is an admin giving a user permission to create one server, or taking it back.
+type PermitChange struct {
+	UserSub   string `json:"userSub"`
+	CanCreate bool   `json:"canCreate"`
 }

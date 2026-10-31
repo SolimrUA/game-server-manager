@@ -13,6 +13,9 @@ var mcAccessServers = [];
 var mcAccessSaved = {};
 var mcAccessEdited = {};
 var mcAccessNames = {};
+//Who may create a server, by sub, in the same saved-vs-edited shape as the grants.
+var mcAccessPermitSaved = {};
+var mcAccessPermitEdited = {};
 
 function mcAccessKey(userSub, serverId) {
   return userSub + '|' + serverId;
@@ -41,9 +44,19 @@ function mcAccessDisplayName(user) {
   return (edited !== null ? edited : (user.name || '')) || user.email || user.sub;
 }
 
+function mcAccessPermit(userSub) {
+  return mcAccessPermitEdited.hasOwnProperty(userSub)
+    ? mcAccessPermitEdited[userSub] : !!mcAccessPermitSaved[userSub];
+}
+
+function mcAccessPermitIsDirty(userSub) {
+  return mcAccessPermitEdited.hasOwnProperty(userSub)
+    && mcAccessPermitEdited[userSub] !== !!mcAccessPermitSaved[userSub];
+}
+
 function mcAccessHasPendingChanges() {
   var pending = mcAccessPendingChanges();
-  return pending.changes.length > 0 || pending.names.length > 0;
+  return pending.changes.length > 0 || pending.names.length > 0 || pending.permits.length > 0;
 }
 
 function mcAccessPendingChanges() {
@@ -67,7 +80,12 @@ function mcAccessPendingChanges() {
     if (!user || mcAccessNames[key] === (user.name || '')) return;
     names.push({ username: username, name: mcAccessNames[key] });
   });
-  return { changes: changes, names: names };
+  var permits = [];
+  Object.keys(mcAccessPermitEdited).forEach(function (sub) {
+    if (!mcAccessPermitIsDirty(sub)) return;
+    permits.push({ userSub: sub, canCreate: mcAccessPermitEdited[sub] });
+  });
+  return { changes: changes, names: names, permits: permits };
 }
 
 function mcAccessUpdateButtons() {
@@ -94,6 +112,18 @@ function mcAccessCellHtml(user, server) {
     '</td>';
 }
 
+//An admin can always create one, so there is nothing to grant them.
+function mcAccessPermitCellHtml(user) {
+  if (user.isAdmin) {
+    return '<td class="mcAccessCell mcAccessAdminCell"><span class="mcBadge running">admin</span></td>';
+  }
+  var dirty = mcAccessPermitIsDirty(user.sub) ? ' mcAccessDirty' : '';
+  return '<td class="mcAccessCell">' +
+    '<input type="checkbox" class="mcAccessPermit' + dirty + '" data-sub="' + escapeHtml(user.sub) + '"' +
+    (mcAccessPermit(user.sub) ? ' checked' : '') + '>' +
+    '</td>';
+}
+
 function mcAccessServerLabel(server) {
   var game = mcGameDisplayName(server.GameName);
   var name = server.ServerName || server.ServerId;
@@ -115,12 +145,14 @@ function renderAccessGrid() {
   if (!headRow || !body) return;
 
   headRow.innerHTML = '<th>User</th>' +
+    '<th class="mcAccessPermitHead" title="Lets this user create one server, which they then own">' +
+    'May create</th>' +
     mcAccessServers.map(function (s) {
       return '<th>' + mcAccessServerLabel(s) + '</th>';
     }).join('') + '<th></th>';
 
   if (mcAccessUsers.length === 0) {
-    body.innerHTML = '<tr class="mcLoadingRow"><td colspan="' + (mcAccessServers.length + 2) + '">No users found</td></tr>';
+    body.innerHTML = '<tr class="mcLoadingRow"><td colspan="' + (mcAccessServers.length + 3) + '">No users found</td></tr>';
     mcAccessUpdateButtons();
     return;
   }
@@ -144,6 +176,7 @@ function renderAccessGrid() {
         (user.name || mcAccessNames.hasOwnProperty('name:' + user.username)
           ? '<span class="mcMuted mcAccessUserEmail">' + escapeHtml(user.email || '') + '</span>' : '') +
       '</td>' +
+      mcAccessPermitCellHtml(user) +
       mcAccessServers.map(function (s) { return mcAccessCellHtml(user, s); }).join('') +
       '<td class="mcAccessRowActions">' + upgrade + '</td>';
     body.appendChild(row);
@@ -152,6 +185,13 @@ function renderAccessGrid() {
   body.querySelectorAll('.mcAccessSelect').forEach(function (select) {
     select.onchange = function () {
       mcAccessEdited[mcAccessKey(select.dataset.sub, select.dataset.server)] = select.value;
+      renderAccessGrid();
+    };
+  });
+
+  body.querySelectorAll('.mcAccessPermit').forEach(function (box) {
+    box.onchange = function () {
+      mcAccessPermitEdited[box.dataset.sub] = box.checked;
       renderAccessGrid();
     };
   });
@@ -200,8 +240,11 @@ async function loadAccess() {
     (data.grants || []).forEach(function (g) {
       mcAccessSaved[mcAccessKey(g.userSub, g.serverId)] = g.role || '';
     });
+    mcAccessPermitSaved = {};
+    (data.permits || []).forEach(function (sub) { mcAccessPermitSaved[sub] = true; });
     mcAccessEdited = {};
     mcAccessNames = {};
+    mcAccessPermitEdited = {};
     renderAccessGrid();
   } catch (e) {
     console.log(e);
@@ -211,7 +254,7 @@ async function loadAccess() {
 
 async function saveAccess() {
   var pending = mcAccessPendingChanges();
-  if (pending.changes.length === 0 && pending.names.length === 0) return;
+  if (pending.changes.length === 0 && pending.names.length === 0 && pending.permits.length === 0) return;
   var save = document.getElementById('mcAccessSave');
   if (save) save.disabled = true;
   var jwt = await getJwt();
@@ -234,6 +277,7 @@ async function saveAccess() {
 function revertAccess() {
   mcAccessEdited = {};
   mcAccessNames = {};
+  mcAccessPermitEdited = {};
   renderAccessGrid();
 }
 

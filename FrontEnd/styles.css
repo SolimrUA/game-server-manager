@@ -630,6 +630,18 @@ table.mcAccessGrid tbody tr:hover td {
     box-shadow: 0 0 0 2px #E3F6FF;
 }
 
+.mcAccessPermit {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+/* Matches the ring an edited dropdown gets, so an unsaved checkbox reads the same way. */
+.mcAccessPermit.mcAccessDirty {
+    outline: 2px solid var(--cyan-dark);
+    outline-offset: 2px;
+}
+
 .mcAccessRowActions {
     text-align: right;
     white-space: nowrap;

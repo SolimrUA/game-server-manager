@@ -47,6 +47,13 @@ func addControlLambdaPermissions(stack awscdk.Stack, fn awslambda.Function, user
 		},
 	})
 
+	// Without this S3 answers 403 rather than 404 for a key that isn't there, so a server that has yet
+	// to report its first status reads as a permissions failure.
+	add(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("s3:ListBucket"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:s3:::%s", *statusBucketName)),
+	})
+
 	// World downloads, mod management and game restarts all reach the instance through Run Command.
 	add(&awsiam.PolicyStatementProps{
 		Actions:   jsii.Strings("ssm:SendCommand"),
