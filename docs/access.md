@@ -23,7 +23,7 @@ server. `autoshutdown` and `resize` are admin-only because they change what the 
 | `view` | `getInfo` |
 | `lifecycle` | `start`, `stop` |
 | `download` | `startWorldDownload`, `getWorldDownloadStatus` |
-| `content` | `installMod`, `deleteMod`, `restartGame`, `updateGame`, `setServerName` |
+| `content` | `installMod`, `deleteMod`, `restartGame`, `updateGame`, `setServerName`, `getWorldDefaults`, `newWorld`, `setPlayerRole` |
 | `backup` | `backupNow` |
 | `password` | `getGamePassword`, `setGamePassword` |
 | `autoshutdown` | `pauseIdleShutdown`, `resumeIdleShutdown` |

@@ -635,6 +635,9 @@ async function renderTable(data) {
         });
       };
 
+      //Only Vintage Story keeps its world settings somewhere the panel can write.
+      var canWorld = canContent && instance['GameName'] === 'vintagestory';
+
       var actionClusters =
         (canLifecycle ? mcActionClusterHtml('Power', mcLifecycleButtonHtml(ec2State)) : '') +
         (canResize ?
@@ -651,6 +654,7 @@ async function renderTable(data) {
             // Grouped under Data, not Power: these act on the server's content, not its power state.
             (canContent ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
         (canPassword ? mcPasswordClusterHtml() : '') +
+        (canWorld ? mcPlayerRoleClusterHtml(modsRunning) : '') +
         (canContent ? mcServerNameClusterHtml(instance['ServerName']) : '') +
         (canAutoShutdown ?
           mcActionClusterHtml('Automation',
@@ -682,9 +686,12 @@ async function renderTable(data) {
           '<div class="mcTab" data-tab="overview">Overview</div>' +
           '<div class="mcTab" data-tab="actions">Actions</div>' +
           '<div class="mcTab" data-tab="mods">Mods</div>' +
+          (canWorld ? '<div class="mcTab" data-tab="world">World</div>' : '') +
         '</div>' +
         '<div class="mcTabPanel mcKvGrid" data-tab-panel="overview">' + overviewHtml + '</div>' +
         '<div class="mcTabPanel mcActionClusters" data-tab-panel="actions">' + actionClusters + '</div>' +
+        (canWorld ? '<div class="mcTabPanel mcWorldPanel" data-tab-panel="world">' +
+          mcWorldPanelHtml() + '</div>' : '') +
         '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' +
           renderModsList(status && status.mods, canContent, modsRunning) +
           (canContent ?
@@ -783,6 +790,72 @@ async function renderTable(data) {
         };
       }
 
+      var playerRoleBtn = detailRow.querySelector('.mcPlayerRoleBtn');
+      if (playerRoleBtn && !playerRoleBtn.disabled) {
+        playerRoleBtn.onclick = async function (e) {
+          e.stopPropagation();
+          var player = detailRow.querySelector('.mcPlayerNameInput').value.trim();
+          var role = detailRow.querySelector('.mcPlayerRoleInput').value.trim();
+          if (!player || !role) { showAlert('Name a player and a role first'); return; }
+          playerRoleBtn.disabled = true;
+          var granted = await grantPlayerRole(instanceId, player, role);
+          var live = mcPlayerRoleFields(instanceId);
+          if (!live) return;
+          live.button.disabled = false;
+          if (granted) live.name.value = '';
+        };
+      }
+
+      var newWorldBtn = detailRow.querySelector('.mcNewWorldBtn');
+      if (newWorldBtn) {
+        mcLoadWorldDefaults(instanceId, instance['GameName']).then(function (presets) {
+          var field = mcWorldField(instanceId);
+          if (!field) return;
+          mcFillWorldPresets(field, presets);
+          //Only when there is nothing there: a rebuild carries an edited block across, and refilling
+          //would throw away what someone is part way through.
+          if (!field.config.value) {
+            field.config.value = mcWorldPresetBody(instance['GameName'], field.preset.value);
+          }
+          field.config.readOnly = !field.customise.checked;
+        });
+
+        //The block always shows what the chosen preset would do. The box decides only whether those
+        //settings are someone's to change.
+        var showPreset = function () {
+          var field = mcWorldField(instanceId);
+          if (!field) return;
+          field.config.readOnly = !field.customise.checked;
+          field.config.value = mcWorldPresetBody(instance['GameName'], field.preset.value);
+        };
+        detailRow.querySelector('.mcWorldCustomiseBox').onchange = function () {
+          var field = mcWorldField(instanceId);
+          if (field) field.config.readOnly = !field.customise.checked;
+        };
+        detailRow.querySelector('.mcWorldPresetSelect').onchange = showPreset;
+
+        newWorldBtn.onclick = async function (e) {
+          e.stopPropagation();
+          var field = mcWorldField(instanceId);
+          if (!field) return;
+          var name = field.name.value.trim();
+          if (!name) { showAlert('Name the new world first'); return; }
+          var body = field.config.value;
+          if (!body) { showAlert('Pick the settings to generate the world from'); return; }
+          if (!confirm('Generate a new world called "' + name + '" on this server?\n\n' +
+              'It is created the next time the game starts. The world this server is on now stays ' +
+              'on its disk, but the control panel cannot switch back to it.')) return;
+
+          newWorldBtn.disabled = true;
+          var saved = await saveNewWorld(instanceId, name, field.seed.value.trim(), body);
+          newWorldBtn.disabled = false;
+          if (saved === null) return;
+          var live = mcWorldField(instanceId);
+          if (live) { live.name.value = ''; live.seed.value = ''; }
+          showAlert('New world saved - it is generated the next time the game starts');
+        };
+      }
+
       var saveServerNameBtn = detailRow.querySelector('.mcSaveServerNameBtn');
       if (saveServerNameBtn) {
         var serverNameInput = detailRow.querySelector('.mcServerNameInput');
@@ -877,6 +950,136 @@ function mcServerNameClusterHtml(currentName) {
     '<input class="mcServerNameInput" maxlength="64" autocomplete="off" placeholder="' +
       escapeHtml(currentName || 'Server name') + '">' +
     '<button class="btn mcSaveServerNameBtn">Save</button>');
+}
+
+// The presets a world can be generated from, by game. Fetched once: they are the same for every
+// server of a game and do not change while the page is open.
+var mcWorldDefaults = {};
+var mcWorldDefaultsPromise = {};
+
+// mcPlayerRoleFields finds a server's player-role controls as they are on the page now.
+function mcPlayerRoleFields(instanceId) {
+  var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
+  var detailRow = row && row.nextElementSibling;
+  var button = detailRow && detailRow.querySelector('.mcPlayerRoleBtn');
+  if (!button) return null;
+  return { button: button, name: detailRow.querySelector('.mcPlayerNameInput') };
+}
+
+//The role reaches the game through its console, so there has to be a game running to hear it.
+function mcPlayerRoleClusterHtml(running) {
+  var off = running ? '' : ' disabled';
+  return mcActionClusterHtml('Player Role',
+    '<input type="text" class="mcPlayerNameInput" maxlength="32" autocomplete="off" placeholder="Player"' + off + '>' +
+    '<input type="text" class="mcPlayerRoleInput" maxlength="32" autocomplete="off" placeholder="Role"' + off + '>' +
+    '<button type="button" class="btn mcPlayerRoleBtn"' + off + '>Grant</button>');
+}
+
+function mcWorldPanelHtml() {
+  return '<p class="mcModsNote">A new world is generated the next time the game starts, and the ' +
+      'world this server is on now stays on its disk. A preset changes only the settings it names.</p>' +
+    '<div class="mcWorldForm">' +
+      '<input type="text" class="mcWorldNameInput" maxlength="48" autocomplete="off" placeholder="World name">' +
+      '<input type="text" class="mcWorldSeedInput" maxlength="64" autocomplete="off" placeholder="Seed (optional)">' +
+      '<select class="mcWorldPresetSelect"></select>' +
+      '<label class="mcWorldCustomise"><input type="checkbox" class="mcWorldCustomiseBox"> Customise</label>' +
+      '<button type="button" class="btn mcNewWorldBtn">Create world</button>' +
+    '</div>' +
+    '<textarea class="mcWorldConfigInput" rows="16" spellcheck="false" readonly></textarea>';
+}
+
+// mcWorldField finds a server's world controls as they are on the page now. A request can outlast
+// the rebuild that replaces the ones its click began with.
+function mcWorldField(instanceId) {
+  var row = document.querySelector('tr.mcServerRow[data-instance-id="' + instanceId + '"]');
+  var detailRow = row && row.nextElementSibling;
+  var name = detailRow && detailRow.querySelector('.mcWorldNameInput');
+  if (!name) return null;
+  return {
+    name: name,
+    seed: detailRow.querySelector('.mcWorldSeedInput'),
+    preset: detailRow.querySelector('.mcWorldPresetSelect'),
+    customise: detailRow.querySelector('.mcWorldCustomiseBox'),
+    config: detailRow.querySelector('.mcWorldConfigInput'),
+    button: detailRow.querySelector('.mcNewWorldBtn')
+  };
+}
+
+async function mcLoadWorldDefaults(instanceId, gameName) {
+  if (mcWorldDefaults.hasOwnProperty(gameName)) return mcWorldDefaults[gameName];
+  if (!mcWorldDefaultsPromise[gameName]) {
+    mcWorldDefaultsPromise[gameName] = (async function () {
+      var jwt = await getJwt();
+      var res = await fetch(API_URL + 'worlddefaults/' + query_string +
+        '&instanceid=' + encodeURIComponent(instanceId), {
+        method: 'get', headers: new Headers({ 'Authorization': jwt })
+      });
+      var data = await res.json();
+      if (Array.isArray(data)) { showAlert(data[0]); return []; }
+      mcWorldDefaults[gameName] = data.presets || [];
+      return mcWorldDefaults[gameName];
+    })();
+  }
+  try {
+    return await mcWorldDefaultsPromise[gameName];
+  } catch (e) {
+    console.log(e);
+    mcWorldDefaultsPromise[gameName] = null;
+    return [];
+  }
+}
+
+// mcWorldPresetBody is what a preset would set, for showing in the block.
+function mcWorldPresetBody(gameName, name) {
+  var presets = mcWorldDefaults[gameName] || [];
+  for (var i = 0; i < presets.length; i++) {
+    if (presets[i].name === name) return presets[i].body;
+  }
+  return '';
+}
+
+// mcFillWorldPresets puts the presets in the dropdown, once they have arrived.
+function mcFillWorldPresets(field, presets) {
+  if (!field || field.preset.options.length === presets.length) return;
+  field.preset.innerHTML = presets.map(function (preset) {
+    return '<option value="' + escapeHtml(preset.name) + '">' + escapeHtml(preset.name) + '</option>';
+  }).join('');
+}
+
+async function grantPlayerRole(instanceId, player, role) {
+  var jwt = await getJwt();
+  try {
+    var res = await fetch(API_URL + 'playerrole/' + query_string + '&instanceid=' + encodeURIComponent(instanceId), {
+      method: 'post',
+      headers: new Headers({ 'Authorization': jwt, 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ playerName: player, playerRole: role })
+    });
+    var data = await res.json();
+    showAlert(Array.isArray(data) ? data[0] : data);
+    return !Array.isArray(data);
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not set that player\'s role');
+    return false;
+  }
+}
+
+async function saveNewWorld(instanceId, name, seed, config) {
+  var jwt = await getJwt();
+  try {
+    var res = await fetch(API_URL + 'newworld/' + query_string + '&instanceid=' + encodeURIComponent(instanceId), {
+      method: 'post',
+      headers: new Headers({ 'Authorization': jwt, 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ worldName: name, worldSeed: seed, worldConfig: config })
+    });
+    var data = await res.json();
+    if (Array.isArray(data)) { showAlert(data[0]); return null; }
+    return data.worldName || '';
+  } catch (e) {
+    console.log(e);
+    showAlert('Could not save the new world');
+    return null;
+  }
 }
 
 function mcPasswordClusterHtml() {

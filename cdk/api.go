@@ -48,6 +48,11 @@ var Endpoints = []Endpoint{
 	{Path: "setgamepassword", Command: "setGamePassword", Params: []string{"instanceid"}, Post: true},
 	// POST because a name is free text, which does not belong in a URL.
 	{Path: "setservername", Command: "setServerName", Params: []string{"instanceid"}, Post: true},
+	{Path: "worlddefaults", Command: "getWorldDefaults", Params: []string{"instanceid"}},
+	// POST because a settings block is free text of any length.
+	{Path: "newworld", Command: "newWorld", Params: []string{"instanceid"}, Post: true},
+	// POST because a player name is free text.
+	{Path: "playerrole", Command: "setPlayerRole", Params: []string{"instanceid"}, Post: true},
 	{Path: "access", Command: "getAccess"},
 	{Path: "saveaccess", Command: "saveAccess", Post: true},
 }

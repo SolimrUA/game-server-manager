@@ -30,6 +30,15 @@ type Game interface {
 	// DeleteFailure turns a failed DeleteMod into a message, since what "couldn't find it" looks like
 	// is particular to how each game's mods are stored.
 	DeleteFailure(req ModRequest, stdout string) error
+	// WorldDefaults is the sets of settings the control panel offers to start a new world from, in
+	// this game's own config format.
+	WorldDefaults() (WorldDefaults, error)
+	// NewWorld turns an edited block into what gets recorded for the server, keeping only the
+	// settings this game lets a new world set.
+	NewWorld(req NewWorldRequest) (StoredWorld, error)
+	// SetPlayerRole gives a player one of the roles the running game knows, which is what decides
+	// the console commands they may run in-game.
+	SetPlayerRole(player, role string) ([]string, error)
 }
 
 // ErrUnsupported reports an operation a game doesn't offer.

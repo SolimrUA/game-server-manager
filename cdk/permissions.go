@@ -181,7 +181,8 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 		Actions: jsii.Strings("ssm:PutParameter", "ssm:GetParameter"),
 		Resources: jsii.Strings(
 			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-password-*", region, account),
-			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-servername-*", region, account)),
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-servername-*", region, account),
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/game-world-*", region, account)),
 	})
 
 	add(&awsiam.PolicyStatementProps{

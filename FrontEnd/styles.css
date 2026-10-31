@@ -737,3 +737,48 @@ table.mcAccessGrid tbody tr:hover td {
     justify-content: flex-end;
     margin-top: 12px;
 }
+
+.mcWorldPanel {
+    padding: 20px 24px;
+}
+
+.mcWorldForm {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.mcWorldNameInput {
+    min-width: 260px;
+}
+
+/* Monospace and full width: this is a config block, read and edited as one. */
+.mcWorldConfigInput {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    border: 1px solid var(--grey-2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    resize: vertical;
+}
+
+.mcWorldSeedInput {
+    min-width: 200px;
+}
+
+.mcWorldCustomise {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--grey-3);
+    white-space: nowrap;
+}
+
+/* Readable and scrollable while it isn't editable: the point is to see what a preset does. */
+.mcWorldConfigInput[readonly] {
+    background: var(--grey-1);
+    cursor: default;
+}

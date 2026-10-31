@@ -44,11 +44,16 @@ type Request struct {
 	SnapshotID   string `json:"snapshotId"`
 
 	Body struct {
-		Changes    []access.Change `json:"changes"`
-		Names      []access.Name   `json:"names"`
-		Permits    []PermitChange  `json:"permits"`
-		Password   string          `json:"password"`
-		ServerName string          `json:"serverName"`
+		Changes     []access.Change `json:"changes"`
+		Names       []access.Name   `json:"names"`
+		Permits     []PermitChange  `json:"permits"`
+		WorldName   string          `json:"worldName"`
+		WorldConfig string          `json:"worldConfig"`
+		WorldSeed   string          `json:"worldSeed"`
+		PlayerName  string          `json:"playerName"`
+		PlayerRole  string          `json:"playerRole"`
+		Password    string          `json:"password"`
+		ServerName  string          `json:"serverName"`
 	} `json:"body"`
 }
 
@@ -108,9 +113,12 @@ var commands = map[string]command{
 
 	"backupNow": {needs: access.Backup, run: backupNow},
 
-	"getGamePassword": {needs: access.Password, run: gamePassword},
-	"setGamePassword": {needs: access.Password, run: setGamePassword},
-	"setServerName":   {needs: access.Content, run: setServerName},
+	"getGamePassword":  {needs: access.Password, run: gamePassword},
+	"setGamePassword":  {needs: access.Password, run: setGamePassword},
+	"setServerName":    {needs: access.Content, run: setServerName},
+	"getWorldDefaults": {needs: access.Content, run: worldDefaults},
+	"newWorld":         {needs: access.Content, run: newWorld},
+	"setPlayerRole":    {needs: access.Content, run: setPlayerRole},
 
 	"pauseIdleShutdown":  {needs: access.AutoShutdown, run: pauseIdleShutdown},
 	"resumeIdleShutdown": {needs: access.AutoShutdown, run: resumeIdleShutdown},

@@ -1,0 +1,15 @@
+{
+  "MapSizeY": 448,
+  "WorldConfig": {
+    "WorldConfiguration": {
+      "playerMoveSpeed": "1.75",
+      "landcover": "0.7",
+      "oceanscale": "1",
+      "upheavelCommonness": "0",
+      "geologicActivity": "0.05",
+      "landformScale": "3.0",
+      "polarEquatorDistance": "50000"
+    },
+    "MapSizeY": 448
+  }
+}

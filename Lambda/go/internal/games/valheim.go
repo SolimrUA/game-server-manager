@@ -223,3 +223,17 @@ with open(modsfile, "w") as f:
     f.write("\n".join(new_entries))
 print("REMOVED")
 PYEOF`
+
+// Valheim's world settings live among its compose environment rather than in a config of their own,
+// which is not something the control panel writes.
+func (valheim) WorldDefaults() (WorldDefaults, error) {
+	return WorldDefaults{}, ErrUnsupported
+}
+
+func (valheim) NewWorld(NewWorldRequest) (StoredWorld, error) {
+	return StoredWorld{}, ErrUnsupported
+}
+
+func (valheim) SetPlayerRole(string, string) ([]string, error) {
+	return nil, ErrUnsupported
+}
