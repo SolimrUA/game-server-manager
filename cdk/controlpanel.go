@@ -221,19 +221,34 @@ func addApi(stack awscdk.Stack, fn awslambda.IFunction, userPool awscognito.IUse
 		CognitoUserPools: &[]awscognito.IUserPool{userPool},
 	})
 
+	// A Lambda's resource policy holds 20KB, and a permission per method fills it: every method here
+	// reaches the same function, so the statements differ only in the path API Gateway came from. One
+	// role the API assumes instead keeps the policy out of it however many endpoints there are.
+	invokeRole := awsiam.NewRole(stack, jsii.String("ControlApiInvokeRole"), &awsiam.RoleProps{
+		AssumedBy: awsiam.NewServicePrincipal(jsii.String("apigateway.amazonaws.com"), nil),
+	})
+	fn.GrantInvoke(invokeRole)
+
 	for _, endpoint := range Endpoints {
-		integration := awsapigateway.NewLambdaIntegration(fn, &awsapigateway.LambdaIntegrationOptions{
-			Proxy: jsii.Bool(false),
-			RequestTemplates: &map[string]*string{
-				"application/json": jsii.String(endpoint.RequestTemplate()),
-			},
-			IntegrationResponses: &[]*awsapigateway.IntegrationResponse{{
-				StatusCode: jsii.String("200"),
-				ResponseParameters: &map[string]*string{
-					"method.response.header.Access-Control-Allow-Origin": jsii.String("'*'"),
+		// AwsIntegration rather than LambdaIntegration: the latter writes a permission per method into
+		// the function's resource policy whatever else it is told, which is the thing being avoided.
+		integration := awsapigateway.NewAwsIntegration(&awsapigateway.AwsIntegrationProps{
+			Service:               jsii.String("lambda"),
+			Path:                  jsii.String("2015-03-31/functions/" + *fn.FunctionArn() + "/invocations"),
+			IntegrationHttpMethod: jsii.String("POST"),
+			Options: &awsapigateway.IntegrationOptions{
+				CredentialsRole: invokeRole,
+				RequestTemplates: &map[string]*string{
+					"application/json": jsii.String(endpoint.RequestTemplate()),
 				},
-			}},
-			Timeout: awscdk.Duration_Millis(jsii.Number(15000)),
+				IntegrationResponses: &[]*awsapigateway.IntegrationResponse{{
+					StatusCode: jsii.String("200"),
+					ResponseParameters: &map[string]*string{
+						"method.response.header.Access-Control-Allow-Origin": jsii.String("'*'"),
+					},
+				}},
+				Timeout: awscdk.Duration_Millis(jsii.Number(15000)),
+			},
 		})
 
 		resource := api.Root().AddResource(jsii.String(endpoint.Path), nil)

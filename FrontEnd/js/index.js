@@ -491,10 +491,80 @@ function mcInstallModFormHtml(gameName, enabled, gameVersion) {
     '<p class="mcModSourceHint">' + escapeHtml(hint.label) + (enabled ? '' : ' — start the server to install or remove mods') + '</p>';
 }
 
+// mcEditingInTable reports whether the cursor is in something in the table that holds what someone
+// has entered.
+function mcEditingInTable(tbody) {
+  var active = document.activeElement;
+  if (!active || !tbody || !tbody.contains(active)) return false;
+  return ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(active.tagName) !== -1;
+}
+
+// mcControlKey names a control by where the markup puts it, so the same control is found again in
+// the panel that replaces this one. seen counts duplicates, which keeps a repeated class apart.
+function mcControlKey(el, seen) {
+  var key = el.tagName + '|' + (el.className || '');
+  seen[key] = (seen[key] || 0) + 1;
+  return key + '|' + seen[key];
+}
+
+function mcEachControl(panel, visit) {
+  if (!panel) return;
+  var seen = {};
+  panel.querySelectorAll('input, select, textarea').forEach(function (el) {
+    visit(el, mcControlKey(el, seen));
+  });
+}
+
+// mcCaptureControls records every control in a panel, so that a rebuild can put back what was in
+// them. Adding a field anywhere needs nothing here: it is found by being a control.
+function mcCaptureControls(panel) {
+  var state = {};
+  mcEachControl(panel, function (el, key) {
+    state[key] = {
+      value: el.value, checked: el.checked, focused: el === document.activeElement,
+      start: el.selectionStart, end: el.selectionEnd,
+      scrollTop: el.scrollTop, scrollLeft: el.scrollLeft
+    };
+  });
+  return state;
+}
+
+function mcRestoreControlValues(panel, state) {
+  mcEachControl(panel, function (el, key) {
+    var was = state[key];
+    if (!was) return;
+    el.value = was.value;
+    el.checked = was.checked;
+  });
+}
+
+// mcRestoreControlFocus puts back where someone was looking in a control, which only means anything
+// once it is on the page.
+function mcRestoreControlFocus(panel, state) {
+  mcEachControl(panel, function (el, key) {
+    var was = state[key];
+    if (!was) return;
+    if (was.focused) el.focus();
+    //Putting the text back puts the caret at the end of it, focused or not.
+    if (was.start != null && typeof el.setSelectionRange === 'function') {
+      el.setSelectionRange(was.start, was.end);
+    }
+    //Putting the text back scrolls a field larger than its box to the end, and the caret alone
+    //doesn't bring it back.
+    el.scrollTop = was.scrollTop;
+    el.scrollLeft = was.scrollLeft;
+  });
+}
+
 async function renderTable(data) {
     var instances = (data && data[1] && data[1]["Instances"]) || [];
     mcSetCanCreateServer(!!(data && data[1] && data[1]["CanCreateServer"]));
     var tbody = document.getElementById('mcServerTableBody');
+    // Nothing is worth replacing a control someone has their cursor in: a half-typed value, a
+    // dropdown mid-choice, a config scrolled to the line being edited. Restoring all of that
+    // afterwards is possible but never quite right, so the refresh waits instead. Only form controls
+    // hold the table back - a focused button cannot, or walking away from one would freeze it.
+    if (mcEditingInTable(tbody)) return;
     var previouslySelectedRow = tbody.querySelector('tr.mcServerRow.selected');
     var previouslySelectedInstanceId = previouslySelectedRow ? previouslySelectedRow.dataset.instanceId : null;
     // Scoped to the selected row's own panel: querying the whole tbody would find whichever row comes
@@ -502,20 +572,9 @@ async function renderTable(data) {
     var previouslyActiveDetail = previouslySelectedRow && previouslySelectedRow.nextElementSibling;
     var previouslyActiveTabEl = previouslyActiveDetail && previouslyActiveDetail.querySelector('.mcTab.active');
     var previouslyActiveTab = previouslyActiveTabEl ? previouslyActiveTabEl.dataset.tab : 'overview';
-    // Same rebuild problem, applied to field contents: without this, the refresh erases whatever is
-    // half-entered or on screen, and takes the caret with it.
-    var previousInputs = ['.mcModRefInput', '.mcModGameVersionInput', '.mcPasswordInput',
-      '.mcServerNameInput'].map(function (selector) {
-      var el = previouslyActiveDetail && previouslyActiveDetail.querySelector(selector);
-      return {
-        selector: selector,
-        value: el ? el.value : '',
-        focused: !!el && el === document.activeElement,
-        start: el && el.selectionStart,
-        end: el && el.selectionEnd,
-        scrollLeft: el ? el.scrollLeft : 0
-      };
-    });
+    // Everything someone may have typed, chosen or scrolled in the open panel, captured by what the
+    // markup makes of each control rather than by a list that has to be kept in step with it.
+    var previousControls = mcCaptureControls(previouslyActiveDetail);
 
     if (instances.length === 0) {
       tbody.innerHTML = '<tr class="mcLoadingRow"><td colspan="8">No gaming server instances found</td></tr>';
@@ -671,11 +730,9 @@ async function renderTable(data) {
       if (retryLink) retryLink.onclick = function (e) { e.stopPropagation(); retryWorldDownload(instanceId); };
 
       var modRefInput = detailRow.querySelector('.mcModRefInput');
+      // Before the handlers below, which read these fields to decide what to show.
       if (instanceId === previouslySelectedInstanceId) {
-        previousInputs.forEach(function (previous) {
-          var el = detailRow.querySelector(previous.selector);
-          if (el && previous.value) el.value = previous.value;
-        });
+        mcRestoreControlValues(detailRow, previousControls);
       }
 
       var revealPasswordBtn = detailRow.querySelector('.mcRevealPasswordBtn');
@@ -797,21 +854,10 @@ async function renderTable(data) {
         detailRow.classList.remove('hidden');
       }
 
-      // Must follow the appendChild calls above: .focus() is a silent no-op on a detached node, and a
-      // scroll offset means nothing until the field has been laid out.
+      // Must follow the appendChild calls above: .focus() is a silent no-op on a detached node, and
+      // a scroll offset means nothing until the field has been laid out.
       if (instanceId === previouslySelectedInstanceId) {
-        previousInputs.forEach(function (previous) {
-          var el = detailRow.querySelector(previous.selector);
-          if (!el) return;
-          if (previous.focused) {
-            el.focus();
-            //Put back where it was, or every refresh moves the caret to the end of the field.
-            el.setSelectionRange(previous.start, previous.end);
-          }
-          //Restoring the text scrolls a field wider than its box to the end, and the caret alone
-          //doesn't bring it back.
-          el.scrollLeft = previous.scrollLeft;
-        });
+        mcRestoreControlFocus(detailRow, previousControls);
       }
 
       // Deliberately not awaited: updates the dot without blocking the render
