@@ -60,6 +60,7 @@ func (e *env) read() settings {
 
 		provision: provision.Config{
 			Templates:            templates,
+			Region:               os.Getenv("AWS_REGION"),
 			SubnetID:             e.Require("subnetId"),
 			InstanceProfileArn:   e.Require("instanceProfileArn"),
 			AmiParameter:         e.Require("amiParameter"),

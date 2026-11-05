@@ -1148,9 +1148,9 @@ function mcShowPasswordState(instanceId, input, revealBtn) {
 }
 
 function showAlert(text) {
-      var al = document.getElementsByClassName("alert");
-    document.getElementsByClassName("alertmsg")[0].innerHTML = text;
-    al[0].style.display = 'block';
+  var al = document.getElementsByClassName("alert");
+  document.getElementsByClassName("alertmsg")[0].innerHTML = text;
+  al[0].style.display = 'block';
 }
 
 function dropdownMenu() {
@@ -1498,13 +1498,17 @@ function updatelinks() {
   document.getElementById("home").setAttribute("href", mcCloudfrontUrl);
   var access = document.getElementById("accessLink");
   if (access) access.setAttribute("href", mcCloudfrontUrl + "/access.html");
+  var worlds = document.getElementById("worldsLink");
+  if (worlds) worlds.setAttribute("href", mcCloudfrontUrl + "/worlds.html");
 }
 
-//The Lambda rejects both access commands from a non-admin regardless; hiding the link just keeps the nav
-//honest about what's reachable.
+//The Lambda rejects every admin command from a non-admin regardless; hiding the links just keeps the
+//nav honest about what's reachable.
 function updateAccessLink() {
-  var access = document.getElementById("accessNav");
-  if (access) access.style.display = mcIsAdmin ? '' : 'none';
+  ["accessNav", "worldsNav"].forEach(function (id) {
+    var nav = document.getElementById(id);
+    if (nav) nav.style.display = mcIsAdmin ? '' : 'none';
+  });
 }
 
 //The button stays hidden until a reply says this caller may create a server, so the handlers are

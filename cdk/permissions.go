@@ -197,4 +197,48 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 		Actions:   jsii.Strings("backup:ListRecoveryPointsByBackupVault"),
 		Resources: &[]*string{fleet.BackupVaultArn},
 	})
+
+	add(&awsiam.PolicyStatementProps{
+		Actions: jsii.Strings("ec2:AttachVolume", "ec2:DetachVolume"),
+		Resources: jsii.Strings(
+			fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, account),
+			fmt.Sprintf("arn:aws:ec2:%s:%s:volume/*", region, account)),
+		Conditions: &map[string]interface{}{
+			"StringEquals": map[string]string{resourceTag: config.ManagedValue},
+		},
+	})
+
+	// Separate from the CreateTags above, which asks for the tag in the request and so only covers
+	// tagging a volume as it is created, not retagging one that exists.
+	add(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("ec2:DeleteTags", "ec2:DeleteVolume", "ec2:CreateTags"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s:%s:volume/*", region, account)),
+		Conditions: &map[string]interface{}{
+			"StringEquals": map[string]string{resourceTag: config.ManagedValue},
+		},
+	})
+
+	add(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("ec2:CreateTags", "ec2:DeleteTags"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", region)),
+		Conditions: &map[string]interface{}{
+			"StringEquals": map[string]string{resourceTag: config.ManagedValue},
+		},
+	})
+
+	add(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("backup:UpdateRecoveryPointLifecycle", "backup:DeleteRecoveryPoint"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", region)),
+	})
+
+	// The vault deletes a recovery point as whoever asked, so the caller needs this although it never
+	// calls EC2 itself. Without it the delete answers 200 and leaves the point expired.
+	add(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("ec2:DeleteSnapshot"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", region)),
+		Conditions: &map[string]interface{}{
+			"StringEquals": map[string]string{resourceTag: config.ManagedValue},
+		},
+	})
+
 }

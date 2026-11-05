@@ -168,7 +168,6 @@ func addServerBackups(stack awscdk.Stack, config Config, statusBucketName *strin
 			"statusBucket":    statusBucketName,
 			"backupTag":       jsii.String(config.BackupTag),
 			"backupValue":     jsii.String(config.BackupValue),
-			"keepPerServer":   jsii.String(fmt.Sprintf("%d", config.KeepBackupsPerServer)),
 			"supersededDays":  jsii.String(fmt.Sprintf("%d", config.SupersededBackupDays)),
 			"accountId":       stack.Account(),
 		},
@@ -191,6 +190,10 @@ func addServerBackups(stack awscdk.Stack, config Config, statusBucketName *strin
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s::image/*", *stack.Region())),
 			jsii.String(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", *stack.Region())),
 		},
+	}))
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions:   jsii.Strings("ec2:CreateTags"),
+		Resources: jsii.Strings(fmt.Sprintf("arn:aws:ec2:%s::snapshot/*", *stack.Region())),
 	}))
 	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
 		Actions:   jsii.Strings("s3:GetObject"),

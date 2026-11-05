@@ -55,6 +55,14 @@ var Endpoints = []Endpoint{
 	{Path: "playerrole", Command: "setPlayerRole", Params: []string{"instanceid"}, Post: true},
 	{Path: "access", Command: "getAccess"},
 	{Path: "saveaccess", Command: "saveAccess", Post: true},
+	{Path: "worlds", Command: "getWorlds"},
+	{Path: "setbackupexpiry", Command: "setBackupExpiry", Params: []string{"snapshotid"}, Post: true},
+	{Path: "setbackupprimary", Command: "setBackupPrimary", Params: []string{"snapshotid"}, Post: true},
+	{Path: "usevolume", Command: "useVolume", Params: []string{"volumeid"}, Post: true},
+	{Path: "retirevolume", Command: "retireVolume", Params: []string{"volumeid"}, Post: true},
+	{Path: "deletevolume", Command: "deleteVolume", Params: []string{"volumeid"}, Post: true},
+	{Path: "deletevolumebackups", Command: "deleteVolumeBackups", Params: []string{"volumeid"}, Post: true},
+	{Path: "deletebackup", Command: "deleteBackup", Params: []string{"snapshotid"}, Post: true},
 }
 
 // paramNames maps a query-string parameter to the field the Lambda reads it as.
@@ -74,6 +82,7 @@ var paramNames = map[string]string{
 	"gameversion":  "gameVersion",
 	"volumesize":   "volumeSize",
 	"snapshotid":   "snapshotId",
+	"volumeid":     "volumeId",
 }
 
 // RequestTemplate builds the mapping template that turns a request into the Lambda's event. The groups

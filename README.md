@@ -98,14 +98,27 @@ Whichever game you create:
 
 ### Rebuilding a server without losing its world
 
-Deleting a server terminates the instance and leaves its data volume behind. What brings a world back
-is a backup, so take one with **Backup Now** first unless the newest scheduled one is recent enough:
-creating a server and choosing a backup under **Restore from** rebuilds the world on a fresh instance,
-with whatever the current install script does. That is also how you take a server down while keeping
-its world, worth doing if you are near the server limit (`MAX_SERVERS`, 10 by default).
+Deleting a server terminates the instance, leaves its data volume behind and stops backing that volume
+up. What brings a world back is a backup, so take one with **Backup Now** first unless the newest
+scheduled one is recent enough: creating a server and choosing a backup under **Restore from** rebuilds
+the world on a fresh instance, with whatever the current install script does. That is also how you take
+a server down while keeping its world, worth doing if you are near the server limit (`MAX_SERVERS`, 10
+by default).
 
 A running server's data volume is independent of the instance: stopping, starting or resizing never
 touches it.
+
+### The worlds a server has held
+
+Restoring a backup builds a new data volume from it, so a server rebuilt more than once has a volume
+per world it has held, and **Restore from** offers every backup marked primary. The admin-only **Backups**
+page lists every volume currently or previously attached to a server, with the backups taken from
+each, and is where they are managed: keeping a backup or giving it an expiry, marking one primary or
+defunct, deleting backups or a volume outright, and stopping backups of a volume set aside.
+
+**Mount to Server** puts a stopped server back onto one of its own earlier volumes without a rebuild.
+The volume has to be free and in the server's availability zone; a world from elsewhere is reached by
+creating a server from its backup instead.
 
 ## Security
 

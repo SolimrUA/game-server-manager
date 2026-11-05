@@ -43,19 +43,22 @@ sudo chmod +x /usr/local/bin/yq
 
 sudo mkdir -p /usr/games/serverconfig
 
-#The data volume is attached only after this script signals success, so a broken install fails fast
-#without touching game data. The device is addressed by its by-id path because NVMe names like
-#/dev/nvme1n1 aren't predictable on Nitro.
+sudo bash -c 'cat > /usr/local/bin/valheim-prepare-data.sh' <<'PREPARE_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+MOUNT_POINT=/usr/games/serverconfig/valheim
+LABEL=gamedata
+
+#Found at every boot. The one EBS device that isn't the root disk is it.
 #
-#Found rather than named: the volume is created as part of launching the instance, so nothing knows its
-#id in time to pass it in. There is exactly one EBS device that isn't the root disk, and that is it.
+#Addressed by its by-id path because NVMe names like /dev/nvme1n1 aren't predictable on Nitro.
 ROOT_DEVICE=$(findmnt -n -o SOURCE / | sed 's/p\?[0-9]*$//')
 DEVICE_PATH=""
 for _ in $(seq 1 30); do
   for link in /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_*; do
     [ -e "$link" ] || continue
     case "$link" in *-part*) continue ;; esac
-    [ "$(readlink -f "$link")" = "$ROOT_DEVICE" ] && continue
+    if [ "$(readlink -f "$link")" = "$ROOT_DEVICE" ]; then continue; fi
     DEVICE_PATH="$link"
     break
   done
@@ -66,16 +69,8 @@ if [ -z "$DEVICE_PATH" ]; then
   echo "No data volume found attached to this instance" >&2
   exit 1
 fi
-DEVICE_UNIT=$(systemd-escape --path --suffix=device "$DEVICE_PATH")
 
-sudo bash -c 'cat > /usr/local/bin/valheim-prepare-data.sh' <<'PREPARE_SCRIPT'
-#!/bin/bash
-set -euo pipefail
-DEVICE="$1"
-MOUNT_POINT=/usr/games/serverconfig/valheim
-LABEL=gamedata
-
-RESOLVED=$(readlink -f "$DEVICE")
+RESOLVED=$(readlink -f "$DEVICE_PATH")
 if ! blkid -o value -s TYPE "$RESOLVED" >/dev/null 2>&1; then
   echo "No filesystem on $RESOLVED - first use of this volume, formatting"
   mkfs.ext4 -L "$LABEL" "$RESOLVED"
@@ -147,16 +142,16 @@ sudo chmod +x /usr/local/bin/valheim-prepare-data.sh
 sudo bash -c "cat > /etc/systemd/system/valheim-data.service" <<EOF
 [Unit]
 Description=Prepare and mount the persistent Valheim data volume
-BindsTo=${DEVICE_UNIT}
-After=${DEVICE_UNIT}
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/valheim-prepare-data.sh '${DEVICE_PATH}'
+ExecStart=/usr/local/bin/valheim-prepare-data.sh
+#Longer than the script's own wait for the disk, so systemd doesn't give up before it does.
+TimeoutStartSec=120
 
 [Install]
-WantedBy=${DEVICE_UNIT}
+WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload

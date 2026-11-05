@@ -61,6 +61,8 @@ type Server struct {
 	PublicIPAddress string `json:"PublicIpAddress"`
 
 	DataVolumeID string `json:"DataVolumeId"`
+	// AvailabilityZone is where the instance runs. A volume only attaches within its own zone.
+	AvailabilityZone string `json:"AvailabilityZone"`
 
 	Capabilities []string `json:"Capabilities"`
 
@@ -95,6 +97,7 @@ func From(instance ec2types.Instance) Server {
 		HostedZoneID:           noHostedZone,
 		PublicIPAddress:        noPublicIP,
 		DataVolumeID:           dataVolumeOf(instance),
+		AvailabilityZone:       zoneOf(instance),
 		IdleShutdownStatus:     tags.IdleShutdownStatus(),
 	}
 	if instance.State != nil {
@@ -147,6 +150,13 @@ func (t Tags) IdleShutdownStatus() string {
 	default:
 		return "enabled"
 	}
+}
+
+func zoneOf(instance ec2types.Instance) string {
+	if instance.Placement == nil {
+		return ""
+	}
+	return aws.ToString(instance.Placement.AvailabilityZone)
 }
 
 func dataVolumeOf(instance ec2types.Instance) string {

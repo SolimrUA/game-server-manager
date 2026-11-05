@@ -38,6 +38,7 @@ type Request struct {
 
 	Game         string `json:"game"`
 	ServerID     string `json:"serverId"`
+	VolumeID     string `json:"volumeId"`
 	InstanceType string `json:"instanceType"`
 	GameVersion  string `json:"gameVersion"`
 	VolumeSize   string `json:"volumeSize"`
@@ -54,6 +55,9 @@ type Request struct {
 		PlayerRole  string          `json:"playerRole"`
 		Password    string          `json:"password"`
 		ServerName  string          `json:"serverName"`
+		// ExpiryDays is how long after it was taken a backup is deleted. Zero means no expiry.
+		ExpiryDays int  `json:"expiryDays"`
+		Primary    bool `json:"primary"`
 	} `json:"body"`
 }
 
@@ -134,6 +138,15 @@ var commands = map[string]command{
 	"getServerOptions": {mayCreate: true, fleetWide: true, run: serverOptions},
 	"createServer":     {mayCreate: true, fleetWide: true, run: createServer},
 	"deleteServer":     {adminOnly: true, run: deleteServer},
+
+	"getWorlds":           {adminOnly: true, fleetWide: true, run: listWorlds},
+	"setBackupExpiry":     {adminOnly: true, fleetWide: true, run: setBackupExpiry},
+	"setBackupPrimary":    {adminOnly: true, fleetWide: true, run: setBackupPrimary},
+	"useVolume":           {adminOnly: true, fleetWide: true, run: useVolume},
+	"retireVolume":        {adminOnly: true, fleetWide: true, run: retireVolume},
+	"deleteVolume":        {adminOnly: true, fleetWide: true, run: deleteVolume},
+	"deleteVolumeBackups": {adminOnly: true, fleetWide: true, run: deleteVolumeBackups},
+	"deleteBackup":        {adminOnly: true, fleetWide: true, run: deleteOneBackup},
 
 	"getAccess":  {adminOnly: true, fleetWide: true, run: getAccess},
 	"saveAccess": {adminOnly: true, fleetWide: true, run: saveAccess},
@@ -282,17 +295,25 @@ func failureMessage(command string) string {
 }
 
 var failureMessages = map[string]string{
-	"start":              "Couldn't start server, please try again later",
-	"stop":               "Stopping server failed - please wait a few minutes and try again",
-	"reSize":             "Something went wrong with resizing your server, please try again later",
-	"backupNow":          "Couldn't start backup, please try again later",
-	"pauseIdleShutdown":  "Couldn't pause auto-shutdown, please try again later",
-	"resumeIdleShutdown": "Couldn't resume auto-shutdown, please try again later",
-	"installMod":         "Couldn't install mod, please try again later",
-	"deleteMod":          "Couldn't delete mod, please try again later",
-	"restartGame":        "Couldn't restart the game, please try again later",
-	"updateGame":         "Couldn't update the game, please try again later",
-	"createServer":       "Couldn't create the server, please try again later",
-	"deleteServer":       "Couldn't delete the server, please try again later",
-	"saveAccess":         "Couldn't save access, please try again later",
+	"start":               "Couldn't start server, please try again later",
+	"stop":                "Stopping server failed - please wait a few minutes and try again",
+	"reSize":              "Something went wrong with resizing your server, please try again later",
+	"backupNow":           "Couldn't start backup, please try again later",
+	"pauseIdleShutdown":   "Couldn't pause auto-shutdown, please try again later",
+	"resumeIdleShutdown":  "Couldn't resume auto-shutdown, please try again later",
+	"installMod":          "Couldn't install mod, please try again later",
+	"deleteMod":           "Couldn't delete mod, please try again later",
+	"restartGame":         "Couldn't restart the game, please try again later",
+	"updateGame":          "Couldn't update the game, please try again later",
+	"createServer":        "Couldn't create the server, please try again later",
+	"deleteServer":        "Couldn't delete the server, please try again later",
+	"getWorlds":           "Couldn't list the worlds, please try again later",
+	"setBackupExpiry":     "Couldn't change when that backup expires, please try again later",
+	"setBackupPrimary":    "Couldn't change that backup's status, please try again later",
+	"useVolume":           "Couldn't put the server on that world, please try again later",
+	"retireVolume":        "Couldn't stop backing up that volume, please try again later",
+	"deleteVolume":        "Couldn't delete that volume, please try again later",
+	"deleteVolumeBackups": "Couldn't delete those backups, please try again later",
+	"deleteBackup":        "Couldn't delete that backup, please try again later",
+	"saveAccess":          "Couldn't save access, please try again later",
 }

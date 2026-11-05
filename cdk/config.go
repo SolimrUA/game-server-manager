@@ -44,7 +44,6 @@ const localConfigFile = ".env"
 // FLEET_STACK_NAME=game-server-fleet-cfn
 // ASSETS_STACK_NAME=game-server-assets-cfn
 // MAX_SERVERS=10
-// KEEP_BACKUPS_PER_SERVER=5
 // SUPERSEDED_BACKUP_DAYS=30
 // ID_TAG_NAME=game-server-finder
 // ID_TAG_VALUE=game-server
@@ -70,7 +69,6 @@ type Config struct {
 	BackupTag   string
 	BackupValue string
 	// How many backups of each server to keep.
-	KeepBackupsPerServer int
 	// How long a backup lives once a newer one supersedes it. Only the newest is kept indefinitely, so
 	// a deleted server keeps one world and lets the rest run out.
 	SupersededBackupDays int
@@ -131,7 +129,6 @@ func LoadConfig() (Config, error) {
 		ManagedValue:         stringEnv("MANAGED_VALUE", "control-panel"),
 		BackupTag:            stringEnv("BACKUP_TAG", "backup"),
 		BackupValue:          stringEnv("BACKUP_VALUE", "daily"),
-		KeepBackupsPerServer: intEnv("KEEP_BACKUPS_PER_SERVER", 5),
 		SupersededBackupDays: intEnv("SUPERSEDED_BACKUP_DAYS", 30),
 
 		AssetBucketName:   requiredEnv("ASSET_BUCKET_NAME"),

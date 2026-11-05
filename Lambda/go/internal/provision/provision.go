@@ -23,6 +23,13 @@ import (
 // and its status object.
 var serverIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`)
 
+// volumeIDPattern and snapshotIDPattern are what an id named by the control panel has to look like,
+// checked before it reaches an AWS call that would act on whatever it names.
+var (
+	volumeIDPattern   = regexp.MustCompile(`^vol-[0-9a-f]{8,32}$`)
+	snapshotIDPattern = regexp.MustCompile(`^snap-[0-9a-f]{8,32}$`)
+)
+
 // minVolumeSizeGib is the smallest data volume a server can be given. A server restored from a
 // backup takes its size from the snapshot instead.
 const minVolumeSizeGib = 8
@@ -34,6 +41,11 @@ type EC2 interface {
 	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
 	DescribeSnapshots(context.Context, *ec2.DescribeSnapshotsInput, ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
 	CreateTags(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	DeleteTags(context.Context, *ec2.DeleteTagsInput, ...func(*ec2.Options)) (*ec2.DeleteTagsOutput, error)
+	DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	DeleteVolume(context.Context, *ec2.DeleteVolumeInput, ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error)
+	AttachVolume(context.Context, *ec2.AttachVolumeInput, ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
+	DetachVolume(context.Context, *ec2.DetachVolumeInput, ...func(*ec2.Options)) (*ec2.DetachVolumeOutput, error)
 }
 
 // SSM holds the join passwords and the AMI to launch.
@@ -65,6 +77,8 @@ type Config struct {
 	InstanceProfileArn string
 	AmiParameter       string
 	StatusBucket       string
+
+	Region string
 
 	ManagedTag   string
 	ManagedValue string
@@ -110,7 +124,19 @@ type Backup struct {
 	Game       string `json:"game"`
 	SizeGib    int32  `json:"sizeGib"`
 	StartTime  string `json:"startTime"`
+	VolumeID   string `json:"volumeId"`
+	Primary    bool   `json:"primary"`
+	// DeleteRequested is when the vault was asked to delete this snapshot, empty when it has not been.
+	DeleteRequested string `json:"deleteRequested"`
 }
+
+// DefunctTag marks a snapshot as one not to offer when creating a server. Absence means primary, so
+// a snapshot the vault has only just made is offered without anything having to tag it.
+const DefunctTag = "defunct"
+
+// deleteRequestedTag records when a snapshot was handed to the vault to delete. The vault gives no
+// sign of having been asked until it has, so this is the only record that it was.
+const deleteRequestedTag = "delete-requested"
 
 // Options is everything the new-server form needs.
 type Options struct {
@@ -136,8 +162,6 @@ func (p *Provisioner) Options(ctx context.Context) Options {
 	}
 }
 
-// backups lists each server's newest backup. The ones behind it exist to put a server back to an
-// earlier point, which is a different thing to ask for than starting a new server.
 func (p *Provisioner) backups(ctx context.Context) ([]Backup, error) {
 	out, err := p.ec2.DescribeSnapshots(ctx, &ec2.DescribeSnapshotsInput{
 		OwnerIds: []string{"self"},
@@ -153,18 +177,12 @@ func (p *Provisioner) backups(ctx context.Context) ([]Backup, error) {
 	})
 
 	backups := []Backup{}
-	seen := map[string]bool{}
 	for _, snapshot := range snapshots {
 		backup := asBackup(snapshot)
-		// A snapshot with no server-id tag stands for itself rather than hiding another server's.
-		key := backup.ServerID
-		if key == "" {
-			key = backup.SnapshotID
-		}
-		if seen[key] {
+		// One on its way out is no more use to a new server than one already gone.
+		if !backup.Primary || backup.DeleteRequested != "" {
 			continue
 		}
-		seen[key] = true
 		backups = append(backups, backup)
 	}
 	return backups, nil
@@ -175,12 +193,16 @@ func asBackup(snapshot ec2types.Snapshot) Backup {
 	for _, tag := range snapshot.Tags {
 		tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
 	}
+	_, defunct := tags[DefunctTag]
 	return Backup{
-		SnapshotID: aws.ToString(snapshot.SnapshotId),
-		ServerID:   tags[server.TagServerID],
-		Game:       tags[server.TagGameName],
-		SizeGib:    aws.ToInt32(snapshot.VolumeSize),
-		StartTime:  aws.ToTime(snapshot.StartTime).UTC().Format("2006-01-02T15:04:05Z"),
+		DeleteRequested: tags[deleteRequestedTag],
+		SnapshotID:      aws.ToString(snapshot.SnapshotId),
+		ServerID:        tags[server.TagServerID],
+		Game:            tags[server.TagGameName],
+		SizeGib:         aws.ToInt32(snapshot.VolumeSize),
+		StartTime:       aws.ToTime(snapshot.StartTime).UTC().Format("2006-01-02T15:04:05Z"),
+		VolumeID:        aws.ToString(snapshot.VolumeId),
+		Primary:         !defunct,
 	}
 }
 
@@ -237,8 +259,30 @@ func (p *Provisioner) Delete(ctx context.Context, s server.Server) (string, erro
 	}
 
 	log.Printf("deleted server %s (%s), data volume %s", s.Label(), s.InstanceID, s.DataVolumeID)
-	return fmt.Sprintf("Terminated %s - create a server from its newest backup to bring this world back.",
-		s.Label()), nil
+	message := fmt.Sprintf("Terminated %s - create a server from its newest backup to bring this world back.",
+		s.Label())
+	if err := p.retireVolume(ctx, s.DataVolumeID); err != nil {
+		log.Printf("%s: %v", s.Label(), err)
+		message += " Its data volume is still being backed up nightly, which needs looking at."
+	}
+	return message, nil
+}
+
+// retireVolume stops a volume being backed up while leaving it named after the server it held, so
+// its world stays listed under that server without gaining new backups.
+func (p *Provisioner) retireVolume(ctx context.Context, volumeID string) error {
+	if volumeID == "" {
+		return nil
+	}
+	// The volume only: a snapshot's own copy of this tag is what lists it as a backup.
+	_, err := p.ec2.DeleteTags(ctx, &ec2.DeleteTagsInput{
+		Resources: []string{volumeID},
+		Tags:      []ec2types.Tag{{Key: aws.String(p.config.BackupTag), Value: aws.String(p.config.BackupValue)}},
+	})
+	if err != nil {
+		return fmt.Errorf("retiring volume %s: %w", volumeID, err)
+	}
+	return nil
 }
 
 // tagVolumes names both of a new server's disks after it and what they hold, so a volume on its own

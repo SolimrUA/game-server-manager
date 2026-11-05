@@ -78,19 +78,24 @@ sudo chmod +x /home/vintagestory/server/VintagestoryServer /home/vintagestory/se
 #server.sh defaults to a shared /var/vintagestory/data; point it at this instance's data path.
 sudo sed -i "s|^DATAPATH='/var/vintagestory/data'|DATAPATH='/home/vintagestory/data'|" /home/vintagestory/server/server.sh
 
-#The data volume is attached only after this script signals success, so a broken install fails fast
-#without touching game data. The device is addressed by its by-id path because NVMe names like
-#/dev/nvme1n1 aren't predictable on Nitro.
+sudo bash -c 'cat > /usr/local/bin/vintagestory-prepare-data.sh' <<'PREPARE_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+VSPORT="$1"
+VSNAME="$2"
+MOUNT_POINT=/home/vintagestory/data
+LABEL=gamedata
+
+#Found at every boot. The one EBS device that isn't the root disk is it.
 #
-#Found rather than named: the volume is created as part of launching the instance, so nothing knows its
-#id in time to pass it in. There is exactly one EBS device that isn't the root disk, and that is it.
+#Addressed by its by-id path because NVMe names like /dev/nvme1n1 aren't predictable on Nitro.
 ROOT_DEVICE=$(findmnt -n -o SOURCE / | sed 's/p\?[0-9]*$//')
 DEVICE_PATH=""
 for _ in $(seq 1 30); do
   for link in /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_*; do
     [ -e "$link" ] || continue
     case "$link" in *-part*) continue ;; esac
-    [ "$(readlink -f "$link")" = "$ROOT_DEVICE" ] && continue
+    if [ "$(readlink -f "$link")" = "$ROOT_DEVICE" ]; then continue; fi
     DEVICE_PATH="$link"
     break
   done
@@ -101,18 +106,8 @@ if [ -z "$DEVICE_PATH" ]; then
   echo "No data volume found attached to this instance" >&2
   exit 1
 fi
-DEVICE_UNIT=$(systemd-escape --path --suffix=device "$DEVICE_PATH")
 
-sudo bash -c 'cat > /usr/local/bin/vintagestory-prepare-data.sh' <<'PREPARE_SCRIPT'
-#!/bin/bash
-set -euo pipefail
-DEVICE="$1"
-VSPORT="$2"
-VSNAME="$3"
-MOUNT_POINT=/home/vintagestory/data
-LABEL=gamedata
-
-RESOLVED=$(readlink -f "$DEVICE")
+RESOLVED=$(readlink -f "$DEVICE_PATH")
 if ! blkid -o value -s TYPE "$RESOLVED" >/dev/null 2>&1; then
   echo "No filesystem on $RESOLVED - first use of this volume, formatting"
   mkfs.ext4 -L "$LABEL" "$RESOLVED"
@@ -157,16 +152,16 @@ sudo chmod +x /usr/local/bin/vintagestory-prepare-data.sh
 sudo bash -c "cat > /etc/systemd/system/vintagestory-data.service" <<EOF
 [Unit]
 Description=Prepare and mount the persistent Vintage Story data volume
-BindsTo=${DEVICE_UNIT}
-After=${DEVICE_UNIT}
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/vintagestory-prepare-data.sh '${DEVICE_PATH}' '${VSPORT}' '${VSNAME}'
+ExecStart=/usr/local/bin/vintagestory-prepare-data.sh '${VSPORT}' '${VSNAME}'
+#Longer than the script's own wait for the disk, so systemd doesn't give up before it does.
+TimeoutStartSec=120
 
 [Install]
-WantedBy=${DEVICE_UNIT}
+WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
@@ -264,8 +259,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory-config.service
 
-#Started as well as enabled: the volume is attached as the instance launches, so its device
-#was already active before this unit existed, and nothing pulls the unit in until the next
-#boot. Last, because mounting ends by starting the units written above. Blocking, so a
-#failure to mount fails the install.
+#Started as well as enabled: enabling only arranges a start on the next boot, and the world has to be
+#mounted now. Last, because mounting ends by starting the units written above. Blocking, so a failure
+#to mount fails the install.
 sudo systemctl start vintagestory-data.service

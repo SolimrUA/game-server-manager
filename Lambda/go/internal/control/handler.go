@@ -30,13 +30,15 @@ type EC2 interface {
 	DeleteTags(context.Context, *ec2.DeleteTagsInput, ...func(*ec2.Options)) (*ec2.DeleteTagsOutput, error)
 }
 
-// Backup reports when each server was last backed up.
+// Backup is the vault the world snapshots live in.
 type Backup interface {
 	ListRecoveryPointsByBackupVault(context.Context, *backup.ListRecoveryPointsByBackupVaultInput, ...func(*backup.Options)) (*backup.ListRecoveryPointsByBackupVaultOutput, error)
+	UpdateRecoveryPointLifecycle(context.Context, *backup.UpdateRecoveryPointLifecycleInput, ...func(*backup.Options)) (*backup.UpdateRecoveryPointLifecycleOutput, error)
+	DeleteRecoveryPoint(context.Context, *backup.DeleteRecoveryPointInput, ...func(*backup.Options)) (*backup.DeleteRecoveryPointOutput, error)
 }
 
-// Backups invokes the Lambda that takes a backup, so that taking one, expiring the one it supersedes
-// and pruning the rest happen the same way however they were asked for.
+// Backups invokes the Lambda that takes a backup, so that taking one and expiring the one it
+// supersedes happen the same way however they were asked for.
 type Backups interface {
 	Now(ctx context.Context, serverID string) (string, error)
 }

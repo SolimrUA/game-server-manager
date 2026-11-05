@@ -494,12 +494,18 @@ tr.mcServerDetail td {
 /* ############# Alert ################ */
 
 .alert {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 64px;
+    z-index: 100;
+    max-width: min(640px, calc(100vw - 32px));
     padding: 14px 24px;
     background-color: var(--dark);
     color: var(--white);
-    margin: 16px 0 0;
     border-radius: 6px;
     font-size: 14px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .alert .closebtn {
@@ -781,4 +787,84 @@ table.mcAccessGrid tbody tr:hover td {
 .mcWorldConfigInput[readonly] {
     background: var(--grey-1);
     cursor: default;
+}
+
+/* Backups page: one block per data volume, with the backups taken from it. */
+.mcWorldServer {
+    margin: 28px 0 8px;
+    font-size: 18px;
+}
+
+.mcWorldGame {
+    margin-left: 8px;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.mcWorldVolume {
+    margin-bottom: 18px;
+    border: 1px solid var(--grey-3);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.mcWorldVolumeHead {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--grey-1);
+}
+
+.mcWorldVolumeId {
+    font-family: monospace;
+    font-weight: 600;
+}
+
+.mcWorldVolumeActions {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+}
+
+table.mcWorldTable {
+    margin: 0;
+    table-layout: fixed;
+    width: 100%;
+}
+
+table.mcWorldTable th:nth-child(1),
+table.mcWorldTable td:nth-child(1) { width: 12em; white-space: nowrap; }
+
+table.mcWorldTable th:nth-child(2),
+table.mcWorldTable td:nth-child(2) { width: 17.5em; white-space: nowrap; }
+
+table.mcWorldTable th:nth-child(3),
+table.mcWorldTable td:nth-child(3) { width: 5em; white-space: nowrap; }
+
+table.mcWorldTable th:nth-child(4),
+table.mcWorldTable td:nth-child(4) { width: 12em; white-space: nowrap; }
+
+table.mcWorldTable th:nth-child(5),
+table.mcWorldTable td:nth-child(5) { width: 6em; white-space: nowrap; }
+
+table.mcWorldTable th:nth-child(6),
+table.mcWorldTable td:nth-child(6) { width: auto; text-align: right; }
+
+.mcWorldActions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    white-space: nowrap;
+}
+
+.mcWorldKept {
+    font-weight: 600;
+}
+
+/* A backup the vault has been asked to remove: still listed, because it is still there. */
+tr.mcWorldGoing td {
+    opacity: 0.55;
+    font-style: italic;
 }

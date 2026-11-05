@@ -29,6 +29,9 @@ server. `autoshutdown` and `resize` are admin-only because they change what the 
 | `autoshutdown` | `pauseIdleShutdown`, `resumeIdleShutdown` |
 | `resize` | `reSize` |
 
+The Backups page is admin-only and has no template: `getWorlds`, `setBackupExpiry`, `setBackupPrimary`, `deleteBackup`,
+`deleteVolumeBackups`, `useVolume`, `retireVolume` and `deleteVolume`.
+
 ## Where assignments live
 
 One DynamoDB item per user per server, in the table the Control Panel stack creates
