@@ -206,7 +206,7 @@ func (p *Provisioner) RetireVolume(ctx context.Context, volumeID string) error {
 		return err
 	}
 	if len(volume.Attachments) > 0 {
-		return usererr.New("That volume is attached to a server, which is still backing it up.")
+		return usererr.New("That volume is attached to a server. Delete the server first.")
 	}
 	return p.retireVolume(ctx, volumeID)
 }

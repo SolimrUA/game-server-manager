@@ -30,10 +30,9 @@ func start(ctx context.Context, h *Handler, _ Request, servers []server.Server) 
 
 	if err := h.nameInDNS(ctx, servers); err != nil {
 		log.Printf("started %s but couldn't update DNS: %v", strings.Join(ids, ", "), err)
-		return "Server started, but DNS update failed - please wait a few minutes and try again " +
-			"or check your hosted zone is setup correctly", nil
+		return "Server started, but naming it in DNS didn't begin - press Start again to retry", nil
 	}
-	return "Started server and updated DNS successfully", nil
+	return "Server started", nil
 }
 
 func stop(ctx context.Context, h *Handler, _ Request, servers []server.Server) (any, error) {
@@ -72,7 +71,7 @@ func resize(ctx context.Context, h *Handler, req Request, servers []server.Serve
 				"resized to x86 server types such as T3a servers)")
 		}
 	}
-	return "Server has been resized - please note it is currently stopped.", nil
+	return "Server resized", nil
 }
 
 func backupNow(ctx context.Context, h *Handler, _ Request, servers []server.Server) (any, error) {

@@ -49,7 +49,7 @@ func installMod(ctx context.Context, h *Handler, req Request, servers []server.S
 	if !result.Succeeded {
 		return nil, usererr.New("Couldn't install mod: " + result.Message())
 	}
-	return "Mod install requested - restart the server (once you're ready) to load it", nil
+	return "Mod install requested - restart the game to load it", nil
 }
 
 // deleteMod removes a mod, and doesn't restart the game for the same reason installMod doesn't.
@@ -81,7 +81,7 @@ func deleteMod(ctx context.Context, h *Handler, req Request, servers []server.Se
 		}
 		return nil, usererr.New("Couldn't delete mod: " + result.Message())
 	}
-	return "Mod removed - restart the server (once you're ready) for the change to take effect", nil
+	return "Mod removed - restart the game to apply it", nil
 }
 
 func restartGame(ctx context.Context, h *Handler, _ Request, servers []server.Server) (any, error) {
@@ -105,7 +105,7 @@ func restartGame(ctx context.Context, h *Handler, _ Request, servers []server.Se
 	if !result.Succeeded {
 		return nil, usererr.New("Couldn't restart the game: " + result.Message())
 	}
-	return "Restart requested - the server will be back in a minute or two", nil
+	return "Restart requested - the server will be back in a few minutes", nil
 }
 
 // updateGame puts the newest release on the server. The update restarts the game itself, so no
@@ -131,8 +131,7 @@ func updateGame(ctx context.Context, h *Handler, _ Request, servers []server.Ser
 	if !result.Succeeded {
 		return nil, usererr.New("Couldn't update the game: " + result.Message())
 	}
-	return "Update requested - the server will be back in a few minutes once it's downloaded and " +
-		"restarted (check /tmp/vs-update.log on the instance if it doesn't come back)", nil
+	return "Update requested - the game restarts once the new version has downloaded", nil
 }
 
 // only returns the single server a per-server command acts on, and how to administer its game.

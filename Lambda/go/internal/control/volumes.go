@@ -131,7 +131,7 @@ func useVolume(ctx context.Context, h *Handler, req Request, servers []server.Se
 	if err := h.provisioner.UseVolume(ctx, target, req.VolumeID); err != nil {
 		return nil, err
 	}
-	return fmt.Sprintf("%s is now on %s. Start it to play that world.", target.Label(), req.VolumeID), nil
+	return fmt.Sprintf("%s is now on %s", target.Label(), req.VolumeID), nil
 }
 
 // serverHolding is the server a world belongs to, named by the volume's own server-id tag.

@@ -168,8 +168,10 @@ async function createServer() {
   create.disabled = false;
 }
 
-async function deleteServer(instanceId, label) {
-  if (!confirm('Delete ' + label + '?\n\nIts backups are kept, so the server can be recreated from one.')) return;
+async function deleteServer(instanceId, label, lastBackup) {
+  var fate = lastBackup ? 'Its backups will be kept.'
+    : 'No backup is listed for it.';
+  if (!confirm('Delete ' + label + '?\n\n' + fate)) return;
   var jwt = await getJwt();
   try {
     const response = await fetch(API_URL + 'deleteserver/' + query_string + '&instanceid=' + instanceId, {
@@ -718,16 +720,16 @@ async function renderTable(data) {
         var lifecycleBtn = container.querySelector('.mcLifecycleBtn');
         if (lifecycleBtn && !lifecycleBtn.disabled) lifecycleBtn.onclick = function (e) {
           e.stopPropagation();
-          if (ec2State === 'stopped') { showAlert('Starting the Server'); startServer(instanceId); }
-          else { showAlert('Stopping the Server'); stopServer(instanceId); }
+          if (ec2State === 'stopped') { showAlert('Starting the server…'); startServer(instanceId); }
+          else { showAlert('Stopping the server…'); stopServer(instanceId); }
         };
         container.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
           btn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId, btn.dataset.scope); };
         });
       });
 
-      if (resizeBtn) resizeBtn.onclick = function (e) { e.stopPropagation(); showAlert('Please wait... Resizing your server'); resizeServer(select.value, instanceId); };
-      if (backupBtn) backupBtn.onclick = function (e) { e.stopPropagation(); showAlert('Starting backup'); backupNow(instanceId); };
+      if (resizeBtn) resizeBtn.onclick = function (e) { e.stopPropagation(); showAlert('Resizing the server…'); resizeServer(select.value, instanceId); };
+      if (backupBtn) backupBtn.onclick = function (e) { e.stopPropagation(); showAlert('Starting backup…'); backupNow(instanceId); };
       if (idleToggleBtn) idleToggleBtn.onclick = function (e) {
         e.stopPropagation();
         if (idlePaused) { showAlert('Resuming auto-shutdown'); resumeIdleShutdown(instanceId); }
@@ -843,8 +845,7 @@ async function renderTable(data) {
           var body = field.config.value;
           if (!body) { showAlert('Pick the settings to generate the world from'); return; }
           if (!confirm('Generate a new world called "' + name + '" on this server?\n\n' +
-              'It is created the next time the game starts. The world this server is on now stays ' +
-              'on its disk, but the control panel cannot switch back to it.')) return;
+              'It is created the next time the game starts.')) return;
 
           newWorldBtn.disabled = true;
           var saved = await saveNewWorld(instanceId, name, field.seed.value.trim(), body);
@@ -896,7 +897,8 @@ async function renderTable(data) {
       detailRow.querySelectorAll('.mcDeleteServerBtn').forEach(function (btn) {
         btn.onclick = function (e) {
           e.stopPropagation();
-          deleteServer(instanceId, instance['ServerId'] || mcGameDisplayName(instance['GameName']));
+          deleteServer(instanceId, instance['ServerId'] || mcGameDisplayName(instance['GameName']),
+            instance['LastBackupTime']);
         };
       });
 
