@@ -52,6 +52,22 @@ def read_unit_state():
         return ""
 
 
+#A restart and an update take the game down without systemd, which goes on reporting the unit as
+#started. Each runs a process for as long as it holds the game down, which is what tells the two apart
+#from a crash.
+MANAGING_PATTERNS = (
+    r"server\.sh\s+(start|stop|restart)\b",
+    r"/tmp/vs-update\.sh",
+)
+
+
+def service_being_managed():
+    for pattern in MANAGING_PATTERNS:
+        if subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0:
+            return True
+    return False
+
+
 def read_service_status():
     #Answers only "is the OS process there"; read_stats() below answers "is it responding yet".
     try:
@@ -64,13 +80,17 @@ def read_service_status():
     if unit == "failed":
         return "failed"
     if unit == "active":
-        #server.sh returns once the screen session is up and the game process appears a moment
-        #later, so one missed pgrep is not yet a crash.
+        if service_being_managed():
+            return "activating"
+        #server.sh's start returns once the screen session is up and the game process appears a
+        #moment later, so a single miss in the handover between the two is not yet a crash.
         time.sleep(2)
         if game_process_running():
             return "active"
-        #systemd records this unit as started and nothing is running under it: the game died after
-        #a start it reported as successful, which is the only way a crash shows up here.
+        if service_being_managed():
+            return "activating"
+        #Nothing is holding the game down and nothing is running under a unit systemd records as
+        #started: it died.
         return "failed"
     if unit in ("activating", "deactivating"):
         return unit
