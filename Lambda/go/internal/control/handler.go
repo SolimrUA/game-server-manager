@@ -109,6 +109,35 @@ func NewHandler(deps Dependencies) *Handler {
 }
 
 // visible lists the servers the caller may see, with everything the control panel shows about each.
+// serverIDs names every server in the fleet. Seeding grants servers a caller cannot see yet, so it
+// cannot work from a list already filtered for them.
+func (h *Handler) serverIDs(ctx context.Context, req Request) ([]string, error) {
+	tagName, tagValue := req.TagName, req.TagValue
+	if tagName == "" {
+		tagName, tagValue = h.config.TagName, h.config.TagValue
+	}
+
+	out, err := h.ec2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		Filters: []ec2types.Filter{{Name: aws.String("tag:" + tagName), Values: []string{tagValue}}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing servers: %w", err)
+	}
+
+	ids := []string{}
+	for _, reservation := range out.Reservations {
+		for _, instance := range reservation.Instances {
+			if instance.State != nil && instance.State.Name == ec2types.InstanceStateNameTerminated {
+				continue
+			}
+			if id := server.From(instance).ServerID; id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids, nil
+}
+
 func (h *Handler) visible(ctx context.Context, req Request, who caller) ([]server.Server, error) {
 	tagName, tagValue := req.TagName, req.TagValue
 	if tagName == "" {

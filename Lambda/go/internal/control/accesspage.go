@@ -17,6 +17,8 @@ type AccessPage struct {
 	Grants  []access.Grant `json:"grants"`
 	// Permits holds the sub of every user who may create a server.
 	Permits []string `json:"permits"`
+	// Defaults is what a user nobody has seen before is granted.
+	Defaults access.Defaults `json:"defaults"`
 }
 
 // AccessServer is a server as something to grant access to. Grants are keyed on the server id, so
@@ -72,7 +74,13 @@ func getAccess(ctx context.Context, h *Handler, _ Request, servers []server.Serv
 	}
 	sort.Strings(holders)
 
-	return AccessPage{Users: users, Servers: grantable, Grants: grants, Permits: holders}, nil
+	defaults, err := h.grants.Defaults(ctx)
+	if err != nil {
+		log.Printf("couldn't read the access defaults: %v", err)
+	}
+
+	return AccessPage{Users: users, Servers: grantable, Grants: grants, Permits: holders,
+		Defaults: defaults}, nil
 }
 
 func saveAccess(ctx context.Context, h *Handler, req Request, _ []server.Server) (any, error) {
@@ -82,6 +90,13 @@ func saveAccess(ctx context.Context, h *Handler, req Request, _ []server.Server)
 	}
 
 	saved := fmt.Sprintf("Saved access for %d server/user %s", len(changes), plural(len(changes), "pair"))
+
+	if req.Body.Defaults != nil {
+		if err := h.grants.SetDefaults(ctx, *req.Body.Defaults, req.Sub); err != nil {
+			return nil, err
+		}
+		saved += ", and changed what a new user is granted"
+	}
 
 	for _, permit := range req.Body.Permits {
 		if err := h.grants.SetPermit(ctx, permit.UserSub, permit.CanCreate, req.Sub); err != nil {

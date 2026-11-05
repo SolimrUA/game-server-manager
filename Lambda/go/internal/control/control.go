@@ -45,16 +45,18 @@ type Request struct {
 	SnapshotID   string `json:"snapshotId"`
 
 	Body struct {
-		Changes     []access.Change `json:"changes"`
-		Names       []access.Name   `json:"names"`
-		Permits     []PermitChange  `json:"permits"`
-		WorldName   string          `json:"worldName"`
-		WorldConfig string          `json:"worldConfig"`
-		WorldSeed   string          `json:"worldSeed"`
-		PlayerName  string          `json:"playerName"`
-		PlayerRole  string          `json:"playerRole"`
-		Password    string          `json:"password"`
-		ServerName  string          `json:"serverName"`
+		Changes []access.Change `json:"changes"`
+		Names   []access.Name   `json:"names"`
+		Permits []PermitChange  `json:"permits"`
+		// Defaults is sent only when the access page changed it, so leaving it alone sends nothing.
+		Defaults    *access.Defaults `json:"defaults"`
+		WorldName   string           `json:"worldName"`
+		WorldConfig string           `json:"worldConfig"`
+		WorldSeed   string           `json:"worldSeed"`
+		PlayerName  string           `json:"playerName"`
+		PlayerRole  string           `json:"playerRole"`
+		Password    string           `json:"password"`
+		ServerName  string           `json:"serverName"`
 		// ExpiryDays is how long after it was taken a backup is deleted. Zero means no expiry.
 		ExpiryDays int  `json:"expiryDays"`
 		Primary    bool `json:"primary"`
@@ -234,14 +236,46 @@ func (h *Handler) who(ctx context.Context, req Request) (caller, error) {
 		return who, nil
 	}
 
-	roles, canCreate, err := h.grants.RolesFor(ctx, req.Sub)
+	granted, err := h.grants.RolesFor(ctx, req.Sub)
 	if err != nil {
 		// Reading no grants is indistinguishable from holding none, and holding none is safe.
 		log.Printf("couldn't read access for %s: %v", req.Sub, err)
 	}
-	who.roles = roles
-	who.canCreate = canCreate
+	if !granted.Seen {
+		granted = h.seed(ctx, req, granted)
+	}
+	who.roles = granted.Roles
+	who.canCreate = granted.CanCreate
 	return who, nil
+}
+
+// seed gives a caller nobody has seen before whatever the defaults grant. A failure leaves them with
+// nothing, which is what any caller starts with, so the request carries on either way.
+func (h *Handler) seed(ctx context.Context, req Request, granted access.Access) access.Access {
+	defaults, err := h.grants.Defaults(ctx)
+	if err != nil {
+		log.Printf("couldn't read the access defaults: %v", err)
+		return granted
+	}
+
+	ids, err := h.serverIDs(ctx, req)
+	if err != nil {
+		log.Printf("couldn't list servers to seed %s: %v", req.Sub, err)
+		return granted
+	}
+	if err := h.grants.Seed(ctx, req.Sub, ids, defaults); err != nil {
+		log.Printf("couldn't seed %s: %v", req.Sub, err)
+		return granted
+	}
+
+	log.Printf("seeded %s with %q on %d servers, canCreate=%t", req.Sub, defaults.Role, len(ids), defaults.CanCreate)
+	if defaults.Role != "" {
+		for _, id := range ids {
+			granted.Roles[id] = defaults.Role
+		}
+	}
+	granted.CanCreate = granted.CanCreate || defaults.CanCreate
+	return granted
 }
 
 // target narrows the caller's servers to the one they named. A server missing from their own list is

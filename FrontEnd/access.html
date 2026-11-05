@@ -55,6 +55,15 @@ SPDX-License-Identifier: MIT-0 -->
       update the game and take a backup. Resize and auto-shutdown stay with admins.
     </p>
 
+    <div class="mcAccessDefaults">
+      <span>A user signing in for the first time gets</span>
+      <select id="mcDefaultRole"></select>
+      <span>on every server</span>
+      <label><input type="checkbox" id="mcDefaultCreate"> and may create one server</label>
+      <span class="mcMuted" id="mcDefaultNote">Applied once, as ordinary grants. Changing this leaves
+        everyone already granted as they are.</span>
+    </div>
+
     <div class="mcAccessGridWrap">
       <table class="mcServerTable mcAccessGrid">
         <thead>

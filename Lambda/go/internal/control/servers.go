@@ -20,13 +20,13 @@ func serverOptions(ctx context.Context, h *Handler, req Request, _ []server.Serv
 
 	// Restoring a backup copies that world onto a server the restorer owns, so the list is narrowed
 	// to the servers they already reach.
-	roles, _, err := h.grants.RolesFor(ctx, req.Sub)
+	granted, err := h.grants.RolesFor(ctx, req.Sub)
 	if err != nil {
 		return nil, err
 	}
 	theirs := make([]provision.Backup, 0, len(options.Backups))
 	for _, backup := range options.Backups {
-		if roles[backup.ServerID] != "" {
+		if granted.Roles[backup.ServerID] != "" {
 			theirs = append(theirs, backup)
 		}
 	}

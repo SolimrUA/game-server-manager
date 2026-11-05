@@ -5,6 +5,8 @@
 //live in the Lambda - this page only ever names a template.
 var MC_TEMPLATES = ['player', 'owner'];
 var MC_TEMPLATE_LABELS = { player: 'Player', owner: 'Owner' };
+//Owner is not something to hand to everyone who signs in, so it isn't offered as a default.
+var MC_DEFAULT_TEMPLATES = ['player'];
 
 var mcAccessUsers = [];
 var mcAccessServers = [];
@@ -16,6 +18,8 @@ var mcAccessNames = {};
 //Who may create a server, by sub, in the same saved-vs-edited shape as the grants.
 var mcAccessPermitSaved = {};
 var mcAccessPermitEdited = {};
+var mcDefaultsSaved = { role: '', canCreate: false };
+var mcDefaultsEdited = null;
 
 function mcAccessKey(userSub, serverId) {
   return userSub + '|' + serverId;
@@ -54,9 +58,43 @@ function mcAccessPermitIsDirty(userSub) {
     && mcAccessPermitEdited[userSub] !== !!mcAccessPermitSaved[userSub];
 }
 
+function mcDefaults() {
+  return mcDefaultsEdited || mcDefaultsSaved;
+}
+
+function mcDefaultsAreDirty() {
+  return mcDefaultsEdited !== null &&
+    (mcDefaultsEdited.role !== mcDefaultsSaved.role ||
+     mcDefaultsEdited.canCreate !== mcDefaultsSaved.canCreate);
+}
+
 function mcAccessHasPendingChanges() {
   var pending = mcAccessPendingChanges();
-  return pending.changes.length > 0 || pending.names.length > 0 || pending.permits.length > 0;
+  return pending.changes.length > 0 || pending.names.length > 0 || pending.permits.length > 0 ||
+    mcDefaultsAreDirty();
+}
+
+function renderDefaults() {
+  var role = document.getElementById('mcDefaultRole');
+  var create = document.getElementById('mcDefaultCreate');
+  if (!role || !create) return;
+
+  var current = mcDefaults();
+  var options = '<option value="">nothing</option>';
+  MC_DEFAULT_TEMPLATES.forEach(function (t) {
+    options += '<option value="' + t + '"' + (current.role === t ? ' selected' : '') + '>' +
+      MC_TEMPLATE_LABELS[t] + '</option>';
+  });
+  role.innerHTML = options;
+  role.className = mcDefaultsAreDirty() ? 'mcAccessDirty' : '';
+  create.checked = current.canCreate;
+
+  role.onchange = function () {
+    mcDefaultsEdited = { role: role.value, canCreate: create.checked };
+    renderDefaults();
+    mcAccessUpdateButtons();
+  };
+  create.onchange = role.onchange;
 }
 
 function mcAccessPendingChanges() {
@@ -85,7 +123,9 @@ function mcAccessPendingChanges() {
     if (!mcAccessPermitIsDirty(sub)) return;
     permits.push({ userSub: sub, canCreate: mcAccessPermitEdited[sub] });
   });
-  return { changes: changes, names: names, permits: permits };
+  var pending = { changes: changes, names: names, permits: permits };
+  if (mcDefaultsAreDirty()) pending.defaults = mcDefaultsEdited;
+  return pending;
 }
 
 function mcAccessUpdateButtons() {
@@ -133,10 +173,28 @@ function mcAccessServerLabel(server) {
   return escapeHtml(game);
 }
 
-//A row of nothing but "—" is a user who has never been granted anything, which is the common case right
-//after someone is added to the pool - so offer the whole row in one click rather than a cell at a time.
 function mcAccessRowHasGaps(user) {
   return mcAccessServers.some(function (s) { return !mcAccessRole(user.sub, s.ServerId); });
+}
+
+function mcAccessRowHasAny(user) {
+  return mcAccessPermit(user.sub) ||
+    mcAccessServers.some(function (s) { return !!mcAccessRole(user.sub, s.ServerId); });
+}
+
+//Both are always shown, so a row's actions don't move about as its access changes.
+function mcAccessRowActions(user) {
+  var up = !user.isAdmin && mcAccessRowHasGaps(user);
+  var down = !user.isAdmin && mcAccessRowHasAny(user);
+  return '<button type="button" class="btn mcAccessUpgrade" data-sub="' + escapeHtml(user.sub) + '"' +
+      (up ? '' : ' disabled') + ' title="' +
+      (up ? 'Give this user Player on every server they have no access to'
+          : 'This user already has access to every server') + '">&uarr; Player</button>' +
+    '<button type="button" class="btn mcAccessDowngrade" data-sub="' + escapeHtml(user.sub) + '"' +
+      (down ? '' : ' disabled') + ' title="' +
+      (down ? 'Take this user off every server, and off creating one'
+            : 'This user has no access to take away') +
+      '">&darr; None</button>';
 }
 
 function renderAccessGrid() {
@@ -163,9 +221,6 @@ function renderAccessGrid() {
     var rename = user.isAdmin ? '' :
       '<button type="button" class="mcAccessRename" title="Set a display name" data-username="' +
       escapeHtml(user.username) + '">&#9998;</button>';
-    var upgrade = (!user.isAdmin && mcAccessRowHasGaps(user)) ?
-      '<button type="button" class="btn mcAccessUpgrade" data-sub="' + escapeHtml(user.sub) +
-      '" title="Give this user Player on every server they have no access to">&uarr; Player</button>' : '';
     var nameDirty = mcAccessNameIsDirty(user);
     row.innerHTML =
       '<td class="mcAccessUserCell">' +
@@ -178,7 +233,7 @@ function renderAccessGrid() {
       '</td>' +
       mcAccessPermitCellHtml(user) +
       mcAccessServers.map(function (s) { return mcAccessCellHtml(user, s); }).join('') +
-      '<td class="mcAccessRowActions">' + upgrade + '</td>';
+      '<td class="mcAccessRowActions">' + mcAccessRowActions(user) + '</td>';
     body.appendChild(row);
   });
 
@@ -202,6 +257,17 @@ function renderAccessGrid() {
       mcAccessServers.forEach(function (s) {
         if (!mcAccessRole(sub, s.ServerId)) mcAccessEdited[mcAccessKey(sub, s.ServerId)] = 'player';
       });
+      renderAccessGrid();
+    };
+  });
+
+  body.querySelectorAll('.mcAccessDowngrade').forEach(function (button) {
+    button.onclick = function () {
+      var sub = button.dataset.sub;
+      mcAccessServers.forEach(function (s) {
+        if (mcAccessRole(sub, s.ServerId)) mcAccessEdited[mcAccessKey(sub, s.ServerId)] = '';
+      });
+      if (mcAccessPermit(sub)) mcAccessPermitEdited[sub] = false;
       renderAccessGrid();
     };
   });
@@ -242,10 +308,13 @@ async function loadAccess() {
     });
     mcAccessPermitSaved = {};
     (data.permits || []).forEach(function (sub) { mcAccessPermitSaved[sub] = true; });
+    mcDefaultsSaved = data.defaults || { role: '', canCreate: false };
+    mcDefaultsEdited = null;
     mcAccessEdited = {};
     mcAccessNames = {};
     mcAccessPermitEdited = {};
     renderAccessGrid();
+    renderDefaults();
   } catch (e) {
     console.log(e);
     showAlert('Could not load access');
@@ -254,7 +323,7 @@ async function loadAccess() {
 
 async function saveAccess() {
   var pending = mcAccessPendingChanges();
-  if (pending.changes.length === 0 && pending.names.length === 0 && pending.permits.length === 0) return;
+  if (!mcAccessHasPendingChanges()) return;
   var save = document.getElementById('mcAccessSave');
   if (save) save.disabled = true;
   var jwt = await getJwt();
@@ -278,7 +347,9 @@ function revertAccess() {
   mcAccessEdited = {};
   mcAccessNames = {};
   mcAccessPermitEdited = {};
+  mcDefaultsEdited = null;
   renderAccessGrid();
+  renderDefaults();
 }
 
 async function initAccess() {

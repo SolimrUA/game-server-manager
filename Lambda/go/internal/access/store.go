@@ -44,11 +44,22 @@ type Grant struct {
 	Role     string `json:"role"`
 }
 
-// RolesFor returns the template each server grants this caller, keyed by server id, and whether they
-// may create a server. One query serves a whole request: the permit is an item in the same partition.
-func (s *Store) RolesFor(ctx context.Context, userSub string) (map[string]string, bool, error) {
+// Access is everything one caller has been granted.
+type Access struct {
+	// Roles is the template each server grants them, keyed by server id.
+	Roles map[string]string
+	// CanCreate reports whether they hold an unspent permission to create a server.
+	CanCreate bool
+	// Seen reports whether anyone has decided anything about this caller yet. Taking someone's access
+	// away records that it was taken, so an empty partition means a caller nobody has met.
+	Seen bool
+}
+
+// RolesFor reads what a caller has been granted. One query serves a whole request: the permit is an
+// item in the same partition.
+func (s *Store) RolesFor(ctx context.Context, userSub string) (Access, error) {
 	if s.table == "" || userSub == "" {
-		return nil, false, nil
+		return Access{}, nil
 	}
 
 	out, err := s.db.Query(ctx, &dynamodb.QueryInput{
@@ -57,19 +68,18 @@ func (s *Store) RolesFor(ctx context.Context, userSub string) (map[string]string
 		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":sub": &ddbtypes.AttributeValueMemberS{Value: userSub}},
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("reading access for %s: %w", userSub, err)
+		return Access{}, fmt.Errorf("reading access for %s: %w", userSub, err)
 	}
 
-	roles := make(map[string]string, len(out.Items))
-	canCreate := false
+	got := Access{Roles: make(map[string]string, len(out.Items)), Seen: len(out.Items) > 0}
 	for _, item := range out.Items {
 		if server := stringAttr(item, keyServer); server == permitKey {
-			canCreate = boolAttr(item, permitAttr)
+			got.CanCreate = boolAttr(item, permitAttr)
 		} else {
-			roles[server] = stringAttr(item, "role")
+			got.Roles[server] = stringAttr(item, "role")
 		}
 	}
-	return roles, canCreate, nil
+	return got, nil
 }
 
 // All returns every grant, for the access page.
@@ -109,8 +119,8 @@ type Change struct {
 	Email    string `json:"email"`
 }
 
-// Save applies changes. A change to no access is a delete rather than a stored empty value, so the
-// table only ever holds real grants.
+// Save applies changes. A change to no access stores an empty role rather than deleting the item, so
+// a user with no items at all is one nobody has decided anything about.
 func (s *Store) Save(ctx context.Context, changes []Change, callerSub string) error {
 	if s.table == "" {
 		return fmt.Errorf("access storage isn't configured")
@@ -130,13 +140,6 @@ func (s *Store) Save(ctx context.Context, changes []Change, callerSub string) er
 			keyUserSub: &ddbtypes.AttributeValueMemberS{Value: c.UserSub},
 			keyServer:  &ddbtypes.AttributeValueMemberS{Value: c.ServerID},
 		}
-		if c.Role == "" {
-			writes = append(writes, ddbtypes.WriteRequest{
-				DeleteRequest: &ddbtypes.DeleteRequest{Key: key},
-			})
-			continue
-		}
-
 		item := map[string]ddbtypes.AttributeValue{
 			keyUserSub:  key[keyUserSub],
 			keyServer:   key[keyServer],
@@ -193,6 +196,10 @@ func stringAttr(item map[string]ddbtypes.AttributeValue, name string) string {
 const permitKey = "#create-permit"
 
 const permitAttr = "canCreate"
+
+// defaultsSub is the partition holding the defaults themselves. A Cognito sub can hold no '#', so it
+// can never collide with a user's own.
+const defaultsSub = "#defaults"
 
 // Permits reports which users may create a server, keyed by sub. Only users holding one appear.
 func (s *Store) Permits(ctx context.Context) (map[string]bool, error) {
@@ -282,4 +289,83 @@ func boolAttr(item map[string]ddbtypes.AttributeValue, name string) bool {
 		return value.Value
 	}
 	return false
+}
+
+// Defaults are what a caller is granted the first time they appear, written as ordinary grants.
+type Defaults struct {
+	// Role is the template every server grants a new caller, empty for none.
+	Role      string `json:"role"`
+	CanCreate bool   `json:"canCreate"`
+}
+
+// Defaults reads what new callers are granted.
+func (s *Store) Defaults(ctx context.Context) (Defaults, error) {
+	if s.table == "" {
+		return Defaults{}, nil
+	}
+
+	out, err := s.db.Query(ctx, &dynamodb.QueryInput{
+		TableName:                 aws.String(s.table),
+		KeyConditionExpression:    aws.String(keyUserSub + " = :sub"),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":sub": &ddbtypes.AttributeValueMemberS{Value: defaultsSub}},
+	})
+	if err != nil {
+		return Defaults{}, fmt.Errorf("reading the access defaults: %w", err)
+	}
+	if len(out.Items) == 0 {
+		return Defaults{}, nil
+	}
+	return Defaults{Role: stringAttr(out.Items[0], "role"), CanCreate: boolAttr(out.Items[0], permitAttr)}, nil
+}
+
+// SetDefaults changes what new callers are granted. It does not touch anyone already granted.
+func (s *Store) SetDefaults(ctx context.Context, d Defaults, callerSub string) error {
+	if s.table == "" {
+		return fmt.Errorf("access storage isn't configured")
+	}
+	if d.Role != "" && d.Role != string(Player) {
+		return fmt.Errorf("a new user can be granted %s or nothing, not %s", Player, d.Role)
+	}
+
+	item := map[string]ddbtypes.AttributeValue{
+		keyUserSub:  &ddbtypes.AttributeValueMemberS{Value: defaultsSub},
+		keyServer:   &ddbtypes.AttributeValueMemberS{Value: defaultsSub},
+		"role":      &ddbtypes.AttributeValueMemberS{Value: d.Role},
+		permitAttr:  &ddbtypes.AttributeValueMemberBOOL{Value: d.CanCreate},
+		"updatedAt": &ddbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+	}
+	if callerSub != "" {
+		item["updatedBy"] = &ddbtypes.AttributeValueMemberS{Value: callerSub}
+	}
+
+	_, err := s.db.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String(s.table), Item: item})
+	if err != nil {
+		return fmt.Errorf("saving the access defaults: %w", err)
+	}
+	return nil
+}
+
+// Seed applies the defaults to one caller. What it writes is what makes them a caller somebody has
+// met, so it never runs twice.
+func (s *Store) Seed(ctx context.Context, userSub string, serverIDs []string, d Defaults) error {
+	if s.table == "" || userSub == "" {
+		return nil
+	}
+
+	changes := make([]Change, 0, len(serverIDs))
+	if d.Role != "" {
+		for _, id := range serverIDs {
+			changes = append(changes, Change{UserSub: userSub, ServerID: id, Role: d.Role})
+		}
+	}
+	if err := s.Save(ctx, changes, ""); err != nil {
+		return err
+	}
+	if d.CanCreate {
+		if err := s.SetPermit(ctx, userSub, true, ""); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -658,6 +658,10 @@ table.mcAccessGrid tbody tr:hover td {
     font-size: 12px;
 }
 
+.mcAccessRowActions .btn + .btn {
+    margin-left: 6px;
+}
+
 .top-nav a.active {
     font-weight: 600;
 }
@@ -867,4 +871,26 @@ table.mcWorldTable td:nth-child(6) { width: auto; text-align: right; }
 tr.mcWorldGoing td {
     opacity: 0.55;
     font-style: italic;
+}
+
+.mcAccessDefaults {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: var(--grey-1);
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.mcAccessDefaults label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.mcAccessDefaults #mcDefaultNote {
+    flex-basis: 100%;
 }
