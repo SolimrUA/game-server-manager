@@ -58,7 +58,6 @@ func startWorldDownload(ctx context.Context, h *Handler, req Request, servers []
 
 	key := worldKey(s, scope)
 	commands, err := game.ArchiveWorld(games.ArchiveRequest{
-		DataPath:     s.DataPath,
 		IncludePaths: includePaths,
 		Scope:        scope,
 		Bucket:       h.config.StatusBucket,

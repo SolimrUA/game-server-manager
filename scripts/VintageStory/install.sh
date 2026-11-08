@@ -10,6 +10,36 @@ set -euo pipefail
 #was served from.
 INSTALLSCRIPTURL="$1"
 BASEURL="${INSTALLSCRIPTURL%/*}"
+#The scripts root holds what every game shares; this game's own files sit under it.
+SCRIPTSURL="${BASEURL%/*}"
+
+DIGESTS=/etc/game-server-manager/digests.txt
+
+#Checked against the one digest UserData pinned: a list that doesn't match is a list this deploy
+#didn't publish, so nothing it names can be trusted either.
+sudo wget -O "$DIGESTS" "${BASEURL}/digests.txt"
+echo "$(cat /etc/game-server-manager/digests.sha256)  $DIGESTS" | sha256sum -c -
+
+#Duplicated in each game's install.sh rather than shared, because this is what bootstraps trust:
+#a shared copy would itself need fetching and verifying, with nothing to verify it against.
+#
+#The list is the whole of what may reach this server, so a missing entry means the deploy and
+#this script disagree about what to install.
+verify() {
+  local want
+  want=$(awk -v name="$1" '$2 == name { print $1 }' "$DIGESTS")
+  if [ -z "$want" ]; then
+    echo "no digest recorded for $1" >&2
+    exit 1
+  fi
+  echo "$want  $2" | sha256sum -c -
+}
+
+fetch_script() {
+  sudo mkdir -p "$(dirname "$2")"
+  sudo wget -O "$2" "${SCRIPTSURL}/$1"
+  verify "$1" "$2"
+}
 
 #Without this apt opens dialogs that hang forever waiting for a terminal there isn't one of. Set
 #directly rather than through sudo, which resets the environment; this already runs as root.
@@ -202,11 +232,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory
 
-sudo wget -O /home/vintagestory/status_agent.py "${BASEURL}/status_agent.py"
-COMPANION_SHA256=$(</etc/game-server-manager/companionSha256.txt)
-if [ -n "$COMPANION_SHA256" ]; then
-  echo "${COMPANION_SHA256}  /home/vintagestory/status_agent.py" | sha256sum -c -
-fi
+fetch_script VintageStory/status_agent.py /home/vintagestory/status_agent.py
 sudo chown vintagestory:vintagestory /home/vintagestory/status_agent.py
 sudo chmod +x /home/vintagestory/status_agent.py
 
@@ -232,12 +258,19 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable vintagestory-status-agent
 
-sudo wget -O /home/vintagestory/apply_config.sh "${BASEURL}/apply_config.sh"
-APPLY_CONFIG_SHA256=$(</etc/game-server-manager/applyConfigSha256.txt)
-if [ -n "$APPLY_CONFIG_SHA256" ]; then
-  echo "${APPLY_CONFIG_SHA256}  /home/vintagestory/apply_config.sh" | sha256sum -c -
-fi
+fetch_script VintageStory/apply_config.sh /home/vintagestory/apply_config.sh
 sudo chmod +x /home/vintagestory/apply_config.sh
+
+#The controller and its operations: the control panel can ask for one of these by name and
+#nothing else.
+fetch_script controller.sh /home/vintagestory/controller/controller.sh
+fetch_script lib/archive.sh /home/vintagestory/controller/lib/archive.sh
+for script in lib/game.sh lib/mods.sh lib/world.sh lib/update-game.sh \
+  ops/install-mod.sh ops/delete-mod.sh ops/restart.sh ops/update.sh ops/set-player-role.sh \
+  ops/archive-world.sh; do
+  fetch_script "VintageStory/$script" "/home/vintagestory/controller/$script"
+done
+sudo chmod +x /home/vintagestory/controller/controller.sh /home/vintagestory/controller/ops/*.sh
 
 sudo bash -c 'cat > /etc/systemd/system/vintagestory-config.service' <<EOF
 [Unit]

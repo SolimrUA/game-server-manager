@@ -38,7 +38,7 @@ The control panel finds the servers it manages by an EC2 tag (`ID_TAG_NAME`/`ID_
 
 None of these stacks fetch anything from the public internet at deploy time. The game install scripts and web site files come from an S3 bucket you control, published from this repository, and the Lambdas are compiled from this repository at deploy time - so every install runs a version you reviewed and pinned rather than whatever is on `main`.
 
-Each new server also verifies a script against a SHA256 hash the Fleet stack pinned at deploy time before executing it, so even write access to that bucket can't get anything executed that you didn't approve.
+Each new server is given one SHA256 hash the control panel stack pinned at deploy time. That hash covers the list of hashes for every script the install fetches, and each script is checked against its entry before anything runs it, with a script the list doesn't name refused outright - so even write access to that bucket can't get anything executed that you didn't approve.
 
 Deploy in this order, from the repo root. The `--stack-name` values below are a fixed convention - copy them as-is.
 

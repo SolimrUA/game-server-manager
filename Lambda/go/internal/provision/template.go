@@ -14,8 +14,7 @@ type Template struct {
 	DisplayName            string  `json:"displayName"`
 	InstallScriptURL       string  `json:"installScriptUrl"`
 	InstallSha256          string  `json:"installSha256"`
-	CompanionSha256        string  `json:"companionSha256"`
-	ApplyConfigSha256      string  `json:"applyConfigSha256"`
+	DigestsSha256          string  `json:"digestsSha256"`
 	DataPath               string  `json:"dataPath"`
 	WorldDownloadPaths     string  `json:"worldDownloadPaths"`
 	WorldDownloadCorePaths string  `json:"worldDownloadCorePaths"`

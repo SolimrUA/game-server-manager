@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -64,10 +63,4 @@ func modRegistry(ctx context.Context, ref, gameVersion string) error {
 	return usererr.Newf("No release of %s lists game version %s. Its newest release (%s) lists %s - "+
 		"install it by naming one of those as the game version",
 		ref, gameVersion, newest.ModVersion, strings.Join(newest.Tags, ", "))
-}
-
-// pythonString renders a value as a Python string literal, for the scripts below that are generated
-// here and run by python3 on the server.
-func pythonString(s string) string {
-	return strconv.Quote(s)
 }

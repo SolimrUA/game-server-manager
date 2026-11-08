@@ -1,5 +1,6 @@
-// Package games holds what differs between the games the control panel manages: the console
-// commands and file edits that install a mod, remove one, restart a server or update it.
+// Package games holds what differs between the games the control panel manages: which of a
+// server's own operations installs a mod, removes one, restarts the game or updates it, and what
+// each of those takes.
 //
 // Everything else about a server - how it is created, backed up, named or shut down - is the same
 // whatever it runs, and lives outside this package.
@@ -14,17 +15,17 @@ import (
 
 // Game is one game's way of being administered.
 //
-// Each method returns the shell commands to run on the server. A game that doesn't offer an
-// operation returns ErrUnsupported.
+// Each method returns the command lines to run on the server, naming one of the operations the
+// server's controller offers. A game that doesn't offer an operation returns ErrUnsupported.
 type Game interface {
 	// InstallMod installs a mod by the reference the mod registry knows it as.
 	InstallMod(ctx context.Context, req ModRequest) ([]string, error)
 	// DeleteMod removes a mod by the display name the control panel is showing.
 	DeleteMod(req ModRequest) ([]string, error)
 	// Restart stops and starts the game, leaving the instance running.
-	Restart(dataPath string) ([]string, error)
+	Restart() ([]string, error)
 	// Update puts the newest release of the game on the server and restarts it.
-	Update(dataPath string) ([]string, error)
+	Update() ([]string, error)
 	// ArchiveWorld zips the world up and copies it to S3 for the caller to download.
 	ArchiveWorld(req ArchiveRequest) ([]string, error)
 	// DeleteFailure turns a failed DeleteMod into a message, since what "couldn't find it" looks like
@@ -51,8 +52,7 @@ type ModRequest struct {
 	// Name is the mod's display name, which is all the control panel has when removing one.
 	Name string
 	// Version is the game version the mod has to match.
-	Version  string
-	DataPath string
+	Version string
 }
 
 // Scope says how much of a server's data to archive.
@@ -75,7 +75,6 @@ func ParseScope(s string) Scope {
 
 // ArchiveRequest says what to archive and where to put it.
 type ArchiveRequest struct {
-	DataPath string
 	// IncludePaths is the comma-separated list of folders this scope covers, from the server's own
 	// tags. Never the whole data directory: that holds the join password.
 	IncludePaths string

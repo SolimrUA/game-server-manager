@@ -19,11 +19,15 @@ import (
 type AssetsStackProps struct {
 	awscdk.StackProps
 	Config Config
+	// DigestsDir holds the per-game lists of script digests, published alongside the scripts
+	// themselves.
+	DigestsDir string
 }
 
-// NewAssetsStack publishes the game scripts an instance downloads as it installs itself. They are
-// readable by anyone, because an instance fetches them before it has credentials of its own, and each
-// one is checked against its digest before it runs.
+// NewAssetsStack publishes the game scripts an instance downloads as it installs itself, and the
+// lists of digests it checks them against. All of it is readable by anyone, because an instance
+// fetches it before it has credentials of its own, and nothing is run before it matches a digest
+// that traces back to the one hash the instance was given.
 func NewAssetsStack(scope constructs.Construct, id string, props *AssetsStackProps) awscdk.Stack {
 	stack := awscdk.NewStack(scope, &id, &props.StackProps)
 	config := props.Config
@@ -62,7 +66,10 @@ func NewAssetsStack(scope constructs.Construct, id string, props *AssetsStackPro
 
 	// Prune is off: the prefix is shared with whatever else is published under it.
 	awss3deployment.NewBucketDeployment(stack, jsii.String("PublishScripts"), &awss3deployment.BucketDeploymentProps{
-		Sources:              &[]awss3deployment.ISource{awss3deployment.Source_Asset(jsii.String("../scripts"), nil)},
+		Sources: &[]awss3deployment.ISource{
+			awss3deployment.Source_Asset(jsii.String("../scripts"), nil),
+			awss3deployment.Source_Asset(jsii.String(props.DigestsDir), nil),
+		},
 		DestinationBucket:    bucket,
 		DestinationKeyPrefix: jsii.String(assetPrefix(config) + "/scripts"),
 		Prune:                jsii.Bool(false),
@@ -109,4 +116,9 @@ func scriptDigest(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func textDigest(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }

@@ -28,11 +28,7 @@ func installMod(ctx context.Context, h *Handler, req Request, servers []server.S
 		version = s.GameStatus.Version()
 	}
 
-	commands, err := game.InstallMod(ctx, games.ModRequest{
-		Ref:      req.ModRef,
-		Version:  version,
-		DataPath: s.DataPath,
-	})
+	commands, err := game.InstallMod(ctx, games.ModRequest{Ref: req.ModRef, Version: version})
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +58,7 @@ func deleteMod(ctx context.Context, h *Handler, req Request, servers []server.Se
 		return nil, usererr.New("No mod was named to delete")
 	}
 
-	modRequest := games.ModRequest{Name: req.ModName, DataPath: s.DataPath}
+	modRequest := games.ModRequest{Name: req.ModName}
 	commands, err := game.DeleteMod(modRequest)
 	if err != nil {
 		return nil, err
@@ -90,7 +86,7 @@ func restartGame(ctx context.Context, h *Handler, _ Request, servers []server.Se
 		return nil, err
 	}
 
-	commands, err := game.Restart(s.DataPath)
+	commands, err := game.Restart()
 	if err != nil {
 		return nil, unsupported(err, "Restart", s.GameName)
 	}
@@ -116,7 +112,7 @@ func updateGame(ctx context.Context, h *Handler, _ Request, servers []server.Ser
 		return nil, err
 	}
 
-	commands, err := game.Update(s.DataPath)
+	commands, err := game.Update()
 	if err != nil {
 		return nil, unsupported(err, "Update", s.GameName)
 	}

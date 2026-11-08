@@ -20,9 +20,14 @@ func main() {
 		Account: jsii.String(config.AwsAccount),
 		Region:  jsii.String(config.AwsRegion),
 	}
+	digestsDir := "../build/scripts-digests"
+	digests, err := writeDigestManifests(digestsDir)
+	must(err)
+
 	assets := NewAssetsStack(app, config.AssetsStackName, &AssetsStackProps{
 		StackProps: awscdk.StackProps{Env: env},
 		Config:     config,
+		DigestsDir: digestsDir,
 	})
 
 	fleet := NewFleetStack(app, config.FleetStackName, &FleetStackProps{
@@ -30,7 +35,7 @@ func main() {
 		Config:     config,
 	})
 
-	templates, err := resolveTemplates(config, fleet.SecurityGroupIds)
+	templates, err := resolveTemplates(config, fleet.SecurityGroupIds, digests)
 	must(err)
 
 	controlPanel := NewControlPanelStack(app, config.ControlPanelStackName, &ControlPanelStackProps{
@@ -68,6 +73,10 @@ func buildLambdas(config Config) error {
 func buildGoLambda(moduleDir, packagePath, assetDir string) error {
 	absolute, err := filepath.Abs(filepath.Join(assetDir, "bootstrap"))
 	if err != nil {
+		return err
+	}
+	//The whole directory is packaged into the function, so it holds this build and nothing else.
+	if err := os.RemoveAll(assetDir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(assetDir, 0o755); err != nil {
