@@ -28,7 +28,6 @@ SPDX-License-Identifier: MIT-0 -->
       <li><a id="home">Home</a></li>
       <li id="accessNav" style="display:none"><a id="accessLink">Access</a></li>
       <li id="worldsNav" style="display:none"><a id="worldsLink">Backups</a></li>
-      <li><a href="#refresh" onclick="location.reload()">Refresh</a></li>
       <li class="top-nav-right"><a href="javascript:void(0);" id="signOutBtn" onclick="logout()">Sign Out</a></li>
       <li class="top-nav-right"><a href="index.html" id="signInBtn">Sign In</a></li>
       <li class="dropdownIcon"><a href="javascript:void(0);" onclick="dropdownMenu()">&#9776;</a></li>
@@ -64,12 +63,13 @@ SPDX-License-Identifier: MIT-0 -->
       <thead>
         <tr>
           <th>DNS</th>
-          <th>Game</th>
-          <th>Server Name</th>
+          <th></th>
           <th>State</th>
+          <th>Server Name</th>
+          <th>Game</th>
           <th>Players</th>
           <th>Last Save</th>
-          <th colspan="2" class="mcActionsHeader">Actions</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="mcServerTableBody">

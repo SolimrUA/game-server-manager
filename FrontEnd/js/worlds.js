@@ -4,7 +4,7 @@
 var mcWorlds = [];
 
 function mcWorldExpiry(backup) {
-  if (!backup.expiresAt) return '<span class="mcWorldKept">Current</span>';
+  if (!backup.expiresAt) return '<span class="mcWorldKept">Does not expire</span>';
   return '<span class="mcMuted">' + escapeHtml(mcWorldDate(backup.expiresAt)) + '</span>';
 }
 

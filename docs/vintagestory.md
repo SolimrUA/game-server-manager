@@ -25,7 +25,7 @@ Create one from the control panel's **New server** form, picking Vintage Story -
   in a preset or typed into **Customise** can reach them. The world's name and seed come from the
   form's own fields. The save file is named after the world, and the world the server was on stays on
   the volume, though the control panel has no way back to it.
-- **Player Role** under Actions runs `/player <name> role <code>` on the running server, which is how
+- **Player Role** under Game Actions runs `/player <name> role <code>` on the running server, which is how
   a player is made an in-game admin. The role codes are the ones in the server's own `Roles`, and the
   game has to be up because the command goes through its console.
 - A mod is installed for a game version, and the control panel sends the one the server reports. A mod

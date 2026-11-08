@@ -240,10 +240,6 @@ table.mcServerTable thead th {
     background: var(--grey-1);
 }
 
-table.mcServerTable thead th.mcActionsHeader {
-    text-align: center;
-}
-
 table.mcServerTable tbody td {
     padding: 13px 14px;
     border-bottom: 1px solid var(--grey-2);
@@ -351,8 +347,15 @@ tr.mcServerDetail td {
     border-bottom-color: var(--cyan);
 }
 
+.mcOverviewSection {
+    padding: 18px 24px;
+}
+
+.mcOverviewSection + .mcOverviewSection {
+    border-top: 1px solid var(--grey-2);
+}
+
 .mcKvGrid {
-    padding: 20px 24px;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 18px 24px;
@@ -373,17 +376,23 @@ tr.mcServerDetail td {
 }
 
 .mcActionClusters {
-    padding: 20px 24px;
-    display: flex;
-    flex-wrap: wrap;
-    row-gap: 20px;
-    align-items: flex-start;
+    padding: 18px 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    align-items: start;
 }
 
-/* Spacing alone, no divider rule: clusters wrap onto as many rows as the width allows, and a rule
-   would land at the start of a wrapped row with nothing to its left. */
-.mcCluster + .mcCluster {
-    margin-left: 24px;
+.mcCluster {
+    border: 1px solid var(--grey-2);
+    border-radius: 8px;
+    background: #fff;
+    padding: 14px 16px;
+}
+
+/* The Mods cluster holds a list and a form, not a row of controls. */
+.mcClusterWide {
+    grid-column: 1 / -1;
 }
 
 .mcClusterLabel {
@@ -397,12 +406,21 @@ tr.mcServerDetail td {
 
 .mcClusterButtons {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     align-items: center;
 }
 
-.mcModsPanel {
-    padding: 20px 24px;
+.mcClusterWide .mcClusterButtons {
+    display: block;
+}
+
+.mcRowActions {
+    white-space: nowrap;
+}
+
+.mcRowActions .btn + .btn {
+    margin-left: 8px;
 }
 
 .mcModsList {
@@ -418,7 +436,7 @@ tr.mcServerDetail td {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: var(--white);
+    background: var(--grey-1);
     border: 1px solid var(--grey-2);
     border-radius: 20px;
     padding: 4px 8px 4px 12px;

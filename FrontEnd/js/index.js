@@ -354,9 +354,13 @@ function mcLifecycleButtonHtml(ec2State, permissionDenied) {
   return '<button class="btn ' + cls + ' mcLifecycleBtn"' + (disabled ? ' disabled' : '') + title + '>' + label + '</button>';
 }
 
-function mcRestartGameButtonHtml(enabled) {
-  var title = enabled ? 'Restart just the game process, not the EC2 instance' : 'Start the server to restart the game';
-  return '<button type="button" class="btn mcRestartGameBtn"' + (enabled ? '' : ' disabled') + ' title="' + title + '">Restart Game</button>';
+// permissionDenied leaves the button in place but inert, so the Actions column holds the same
+// buttons whoever is looking.
+function mcRestartGameButtonHtml(enabled, permissionDenied) {
+  var title = permissionDenied ? 'You don\'t have permission to control this server\'s game'
+    : enabled ? 'Reboot just the game process, not the EC2 instance' : 'Start the server to reboot the game';
+  var off = (!enabled || permissionDenied) ? ' disabled' : '';
+  return '<button type="button" class="btn mcRestartGameBtn"' + off + ' title="' + title + '">Reboot Game</button>';
 }
 
 function mcUpdateGameButtonHtml(enabled) {
@@ -617,14 +621,16 @@ async function renderTable(data) {
           '<span class="mcDnsDot" data-dns-dot></span>' + escapeHtml(dns) +
           (dns !== '—' ? '<span class="mcCopyDns">' + MC_COPY_ICON_SVG + '</span>' : '') +
         '</span></td>' +
-        '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
+        '<td>' + mcLifecycleButtonHtml(ec2State, !canLifecycle) + '</td>' +
+        '<td><span class="mcBadge ' + combinedState.badgeClass + '">' + escapeHtml(combinedState.text) + '</span>' + mcDiskWarnHtml(instance) + '</td>' +
         '<td' + (instance['ServerName'] ? '>' : ' class="mcMuted">') +
           escapeHtml(instance['ServerName'] || '—') + '</td>' +
-        '<td><span class="mcBadge ' + combinedState.badgeClass + '">' + escapeHtml(combinedState.text) + '</span>' + mcDiskWarnHtml(instance) + '</td>' +
+        '<td>' + mcGameDisplayName(instance['GameName']) + '</td>' +
         '<td>' + playersText + '</td>' +
         '<td>' + lastSaveText + '</td>' +
-        '<td>' + mcLifecycleButtonHtml(ec2State, !canLifecycle) + '</td>' +
-        '<td>' + mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)', !canDownload) + '</td>';
+        '<td class="mcRowActions">' +
+          mcDownloadWorldButtonHtml(instanceId, 'core', 'Download', !canDownload) +
+          mcRestartGameButtonHtml(modsRunning, !canContent) + '</td>';
 
       var dnsCell = row.querySelector('.mcDnsCell[data-dns-value]');
       if (dnsCell) dnsCell.onclick = function (e) {
@@ -640,45 +646,60 @@ async function renderTable(data) {
       //Only Vintage Story keeps its world settings somewhere the panel can write.
       var canWorld = canContent && instance['GameName'] === 'vintagestory';
 
-      var actionClusters =
+      var ec2Clusters =
         (canLifecycle ? mcActionClusterHtml('Power', mcLifecycleButtonHtml(ec2State)) : '') +
         (canResize ?
           mcActionClusterHtml('Capacity',
             '<select class="mcResizeSelect">' + mcResizeOptionsHtml(instance['InstanceType']) + '</select>' +
-            '<button class="btn primary">Resize</button>') : '') +
-        ((canBackup || canDownload || canContent) ?
-          mcActionClusterHtml('Data',
-            (canBackup ? '<button class="btn mcBackupNowBtn">Backup Now</button>' : '') +
-            (canDownload ?
-              mcDownloadWorldButtonHtml(instanceId, 'full', 'Download (All Data)') +
-              mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)') +
-              '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>' : '') +
-            // Grouped under Data, not Power: these act on the server's content, not its power state.
-            (canContent ? mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning) : '')) : '') +
-        (canPassword ? mcPasswordClusterHtml() : '') +
-        (canWorld ? mcPlayerRoleClusterHtml(modsRunning) : '') +
-        (canContent ? mcServerNameClusterHtml(instance['ServerName']) : '') +
+            '<button class="btn primary mcResizeBtn">Resize</button>') : '') +
+        (canBackup ?
+          mcActionClusterHtml('Backup',
+            '<button class="btn mcBackupNowBtn">Backup Now</button>' +
+            '<span class="mcMuted">Last: ' + mcRelativeTimeText(instance['LastBackupTime']) + '</span>') : '') +
         (canAutoShutdown ?
           mcActionClusterHtml('Automation',
             '<button class="btn mcIdleShutdownToggleBtn">' + (idlePaused ? 'Resume Auto-Shutdown' : 'Pause Auto-Shutdown') + '</button>' +
             '<span class="mcMuted">Auto-shutdown: ' + escapeHtml(idleStatus.text) + '</span>') : '') +
         (mcIsAdmin ?
-          mcActionClusterHtml('Server',
+          mcActionClusterHtml('Instance',
             '<button type="button" class="btn danger mcDeleteServerBtn">Delete Server</button>') : '');
 
+      var gameClusters =
+        (canContent ?
+          mcActionClusterHtml('Game',
+            mcRestartGameButtonHtml(modsRunning) + mcUpdateGameButtonHtml(modsRunning)) : '') +
+        (canDownload ?
+          mcActionClusterHtml('World Download',
+            mcDownloadWorldButtonHtml(instanceId, 'full', 'Download (All Data)') +
+            mcDownloadWorldButtonHtml(instanceId, 'core', 'Download (Just World)') +
+            '<span class="mcWorldDownloadStatus">' + mcWorldDownloadStatusHtml(instanceId) + '</span>') : '') +
+        (canPassword ? mcPasswordClusterHtml() : '') +
+        (canWorld ? mcPlayerRoleClusterHtml(modsRunning) : '') +
+        (canContent ? mcServerNameClusterHtml(instance['ServerName']) : '') +
+        mcActionClusterHtml('Mods',
+          renderModsList(status && status.mods, canContent, modsRunning) +
+          (canContent ?
+            mcInstallModFormHtml(instance['GameName'], modsRunning,
+              instance['GameStatus'] && instance['GameStatus'].version) +
+            '<p class="mcModsNote">Installing or removing a mod here can take a minute or two to show ' +
+            'up in the list above, and takes effect once the game is rebooted.</p>' : ''),
+          'mcClusterWide');
+
       var overviewHtml =
-        mcKvHtml('Game', mcGameDisplayName(instance['GameName'])) +
-        mcKvHtml('Server Name', escapeHtml(instance['ServerName'] || '—')) +
-        mcKvHtml('EC2 State', escapeHtml(ec2State || '—')) +
-        mcKvHtml('Game State', escapeHtml(gameStatus.text)) +
-        mcKvHtml('Auto-Shutdown', escapeHtml(idleStatus.text)) +
-        mcKvHtml('Players', playersText) +
-        mcKvHtml('Last Save', lastSaveText) +
-        mcKvHtml('Free disk space', mcDiskText(status && status.disk)) +
-        mcKvHtml('Type', escapeHtml(instance['InstanceType'] || '—')) +
-        mcKvHtml('IP Address', escapeHtml(instance['PublicIpAddress'] || '—')) +
-        mcKvHtml('Version', versionText) +
-        mcKvHtml('Last Backup', mcRelativeTimeText(instance['LastBackupTime']));
+        mcOverviewSectionHtml('EC2 Overview',
+          mcKvHtml('EC2 State', escapeHtml(ec2State || '—')) +
+          mcKvHtml('Auto-Shutdown', escapeHtml(idleStatus.text)) +
+          mcKvHtml('Free Disk Space', mcDiskText(status && status.disk)) +
+          mcKvHtml('Type', escapeHtml(instance['InstanceType'] || '—')) +
+          mcKvHtml('IP Address', escapeHtml(instance['PublicIpAddress'] || '—')) +
+          mcKvHtml('Last Backup', mcRelativeTimeText(instance['LastBackupTime']))) +
+        mcOverviewSectionHtml('Game Overview',
+          mcKvHtml('Game', mcGameDisplayName(instance['GameName'])) +
+          mcKvHtml('Server Name', escapeHtml(instance['ServerName'] || '—')) +
+          mcKvHtml('Game State', escapeHtml(gameStatus.text)) +
+          mcKvHtml('Players', playersText) +
+          mcKvHtml('Last Save', lastSaveText) +
+          mcKvHtml('Game Version', versionText));
 
       var detailRow = document.createElement('tr');
       detailRow.className = 'mcServerDetail hidden';
@@ -686,24 +707,15 @@ async function renderTable(data) {
         '<td colspan="8">' +
         '<div class="mcTabsNav">' +
           '<div class="mcTab" data-tab="overview">Overview</div>' +
-          '<div class="mcTab" data-tab="actions">Actions</div>' +
-          '<div class="mcTab" data-tab="mods">Mods</div>' +
+          '<div class="mcTab" data-tab="gameactions">Game Actions</div>' +
           (canWorld ? '<div class="mcTab" data-tab="world">World</div>' : '') +
+          '<div class="mcTab" data-tab="ec2actions">EC2 Actions</div>' +
         '</div>' +
-        '<div class="mcTabPanel mcKvGrid" data-tab-panel="overview">' + overviewHtml + '</div>' +
-        '<div class="mcTabPanel mcActionClusters" data-tab-panel="actions">' + actionClusters + '</div>' +
+        '<div class="mcTabPanel mcOverviewPanel" data-tab-panel="overview">' + overviewHtml + '</div>' +
+        '<div class="mcTabPanel mcActionClusters" data-tab-panel="gameactions">' + gameClusters + '</div>' +
         (canWorld ? '<div class="mcTabPanel mcWorldPanel" data-tab-panel="world">' +
           mcWorldPanelHtml() + '</div>' : '') +
-        '<div class="mcTabPanel mcModsPanel" data-tab-panel="mods">' +
-          renderModsList(status && status.mods, canContent, modsRunning) +
-          (canContent ?
-            mcInstallModFormHtml(instance['GameName'], modsRunning,
-              instance['GameStatus'] && instance['GameStatus'].version) +
-            '<p class="mcModsNote">Installing or removing a mod here can take a minute or two to show up in the list above. ' +
-            'Changes only take effect after a restart:</p>' +
-            mcRestartGameButtonHtml(modsRunning)
-            : '') +
-        '</div>' +
+        '<div class="mcTabPanel mcActionClusters" data-tab-panel="ec2actions">' + ec2Clusters + '</div>' +
         '</td>';
 
       detailRow.querySelectorAll('.mcTab').forEach(function (tab) {
@@ -711,8 +723,8 @@ async function renderTable(data) {
       });
       mcSwitchTab(detailRow, instanceId === previouslySelectedInstanceId ? previouslyActiveTab : 'overview');
 
-      var select = detailRow.querySelector('select');
-      var resizeBtn = detailRow.querySelector('.primary');
+      var select = detailRow.querySelector('.mcResizeSelect');
+      var resizeBtn = detailRow.querySelector('.mcResizeBtn');
       var backupBtn = detailRow.querySelector('.mcBackupNowBtn');
       var idleToggleBtn = detailRow.querySelector('.mcIdleShutdownToggleBtn');
 
@@ -725,6 +737,14 @@ async function renderTable(data) {
         };
         container.querySelectorAll('.mcDownloadWorldBtn').forEach(function (btn) {
           btn.onclick = function (e) { e.stopPropagation(); downloadWorld(instanceId, btn.dataset.scope); };
+        });
+        container.querySelectorAll('.mcRestartGameBtn').forEach(function (btn) {
+          if (btn.disabled) return;
+          btn.onclick = function (e) {
+            e.stopPropagation();
+            showAlert('Rebooting the game…');
+            restartGame(instanceId);
+          };
         });
       });
 
@@ -788,7 +808,7 @@ async function renderTable(data) {
           if (saved === null) return;
           var field = mcPasswordField(instanceId);
           if (field) field.input.value = saved;
-          showAlert('Join password saved - restart the game to apply it');
+          showAlert('Join password saved - reboot the game to apply it');
         };
       }
 
@@ -871,7 +891,7 @@ async function renderTable(data) {
           //The request can outlast the rebuild that replaces this field, so it is looked up again.
           var live = mcServerNameField(instanceId);
           if (live) live.value = '';
-          showAlert('Server name saved - restart the game to apply it');
+          showAlert('Server name saved - reboot the game to apply it');
         };
       }
       var installModBtn = detailRow.querySelector('.mcInstallModBtn');
@@ -902,19 +922,10 @@ async function renderTable(data) {
         };
       });
 
-      detailRow.querySelectorAll('.mcRestartGameBtn').forEach(function (btn) {
-        if (btn.disabled) return;
-        btn.onclick = function (e) {
-          e.stopPropagation();
-          showAlert('Restarting the game…');
-          restartGame(instanceId);
-        };
-      });
-
       var updateGameBtn = detailRow.querySelector('.mcUpdateGameBtn');
       if (updateGameBtn && !updateGameBtn.disabled) updateGameBtn.onclick = function (e) {
         e.stopPropagation();
-        if (!window.confirm('Update ' + mcGameDisplayName(instance['GameName']) + ' to the latest version? This briefly restarts the game.')) return;
+        if (!window.confirm('Update ' + mcGameDisplayName(instance['GameName']) + ' to the latest version? This briefly reboots the game.')) return;
         showAlert('Updating the game…');
         updateGame(instanceId);
       };
@@ -1091,9 +1102,15 @@ function mcPasswordClusterHtml() {
     '<button class="btn mcSavePasswordBtn">Save</button>');
 }
 
-function mcActionClusterHtml(label, buttonsHtml) {
-  return '<div class="mcCluster"><div class="mcClusterLabel">' + label + '</div>' +
+function mcActionClusterHtml(label, buttonsHtml, extraClass) {
+  return '<div class="mcCluster' + (extraClass ? ' ' + extraClass : '') + '">' +
+    '<div class="mcClusterLabel">' + label + '</div>' +
     '<div class="mcClusterButtons">' + buttonsHtml + '</div></div>';
+}
+
+function mcOverviewSectionHtml(label, kvHtml) {
+  return '<div class="mcOverviewSection"><div class="mcClusterLabel">' + label + '</div>' +
+    '<div class="mcKvGrid">' + kvHtml + '</div></div>';
 }
 
 function mcKvHtml(label, value) {
