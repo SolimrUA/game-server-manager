@@ -93,8 +93,7 @@ Whichever game you create:
   The instance brings its game config into line with that parameter before the game starts, so the
   parameter is the password the server enforces. Owners read and change it under **Join Password** in
   the control panel; a new one applies the next time the game starts, which is what **Reboot Game**
-  is for. A server recreated under the same id keeps its password, and one restored from another
-  server's snapshot inherits that server's.
+  is for. A server restored from another server's snapshot inherits that server's password.
 
 ### Rebuilding a server without losing its world
 

@@ -11,8 +11,6 @@ import (
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// Grants are keyed on the server id: a server rebuilt under the same id is the same server to the
-// people playing on it, and keeps the access they were given.
 const (
 	keyUserSub = "userSub"
 	keyServer  = "serverId"
@@ -368,4 +366,103 @@ func (s *Store) Seed(ctx context.Context, userSub string, serverIDs []string, d 
 	}
 
 	return nil
+}
+
+// ForgetServer deletes a server's grants outright, where revoking access keeps an empty role. A
+// server id can be used again, and the next server to take it would otherwise inherit the access the
+// last one was given.
+func (s *Store) ForgetServer(ctx context.Context, serverID string) error {
+	if s.table == "" || serverID == "" {
+		return nil
+	}
+
+	keys, err := s.keysForServer(ctx, serverID)
+	if err != nil {
+		return err
+	}
+	writes := make([]ddbtypes.WriteRequest, 0, len(keys))
+	for _, key := range keys {
+		writes = append(writes, ddbtypes.WriteRequest{DeleteRequest: &ddbtypes.DeleteRequest{Key: key}})
+	}
+	return s.write(ctx, writes)
+}
+
+// keysForServer scans because the table is keyed by user, not by server.
+func (s *Store) keysForServer(ctx context.Context, serverID string) ([]map[string]ddbtypes.AttributeValue, error) {
+	keys := []map[string]ddbtypes.AttributeValue{}
+	pages := dynamodb.NewScanPaginator(s.db, &dynamodb.ScanInput{
+		TableName:                 aws.String(s.table),
+		ProjectionExpression:      aws.String("#user, #server"),
+		FilterExpression:          aws.String("#server = :server"),
+		ExpressionAttributeNames:  map[string]string{"#user": keyUserSub, "#server": keyServer},
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":server": &ddbtypes.AttributeValueMemberS{Value: serverID}},
+	})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scanning the grants on %s: %w", serverID, err)
+		}
+		for _, item := range page.Items {
+			keys = append(keys, map[string]ddbtypes.AttributeValue{
+				keyUserSub: &ddbtypes.AttributeValueMemberS{Value: stringAttr(item, keyUserSub)},
+				keyServer:  &ddbtypes.AttributeValueMemberS{Value: stringAttr(item, keyServer)},
+			})
+		}
+	}
+	return keys, nil
+}
+
+// ApplyDefaultsTo makes a new server reachable by the people the whole fleet is already shared with,
+// not only by whoever created it.
+func (s *Store) ApplyDefaultsTo(ctx context.Context, serverID string) error {
+	if s.table == "" || serverID == "" {
+		return nil
+	}
+
+	d, err := s.Defaults(ctx)
+	if err != nil {
+		return err
+	}
+	if d.Role == "" {
+		return nil
+	}
+
+	grants, err := s.All(ctx)
+	if err != nil {
+		return err
+	}
+	changes := []Change{}
+	for _, sub := range subsWithAccessEverywhere(grants, serverID) {
+		changes = append(changes, Change{UserSub: sub, ServerID: serverID, Role: d.Role})
+	}
+	return s.Save(ctx, changes, "")
+}
+
+// subsWithAccessEverywhere demands a role on every other server because someone kept off an existing
+// server is not who a new one is shared with by default.
+func subsWithAccessEverywhere(grants []Grant, exclude string) []string {
+	servers := map[string]bool{}
+	held := map[string]int{}
+	order := []string{}
+	for _, g := range grants {
+		if g.ServerID == exclude || g.UserSub == defaultsSub {
+			continue
+		}
+		servers[g.ServerID] = true
+		if g.Role == "" {
+			continue
+		}
+		if held[g.UserSub] == 0 {
+			order = append(order, g.UserSub)
+		}
+		held[g.UserSub]++
+	}
+
+	subs := []string{}
+	for _, sub := range order {
+		if held[sub] == len(servers) {
+			subs = append(subs, sub)
+		}
+	}
+	return subs
 }

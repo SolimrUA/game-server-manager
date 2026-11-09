@@ -67,21 +67,44 @@ func createServer(ctx context.Context, h *Handler, req Request, _ []server.Serve
 		return nil, err
 	}
 
-	if !isAdmin {
-		owner := []access.Change{{UserSub: req.Sub, ServerID: req.ServerID, Role: string(access.Owner)}}
-		if err := h.grants.Save(ctx, owner, req.Sub); err != nil {
-			// The server exists either way, and an admin can grant what this failed to.
-			log.Printf("couldn't make %s the owner of %s: %v", req.Sub, req.ServerID, err)
-		}
-	}
+	h.grantAccessToNewServer(ctx, req, isAdmin)
 	return message, nil
+}
+
+// grantAccessToNewServer cannot fail the request: the server exists by now, and an admin can grant
+// what didn't get written.
+func (h *Handler) grantAccessToNewServer(ctx context.Context, req Request, isAdmin bool) {
+	// The owner grant below writes the same item, so the defaults have to go first or the creator is
+	// left with the default role.
+	if err := h.grants.ApplyDefaultsTo(ctx, req.ServerID); err != nil {
+		log.Printf("couldn't apply the access defaults to %s: %v", req.ServerID, err)
+	}
+	if isAdmin {
+		return
+	}
+	owner := []access.Change{{UserSub: req.Sub, ServerID: req.ServerID, Role: string(access.Owner)}}
+	if err := h.grants.Save(ctx, owner, req.Sub); err != nil {
+		log.Printf("couldn't make %s the owner of %s: %v", req.Sub, req.ServerID, err)
+	}
 }
 
 func deleteServer(ctx context.Context, h *Handler, _ Request, servers []server.Server) (any, error) {
 	if len(servers) == 0 {
 		return nil, usererr.New("No matching instance found")
 	}
-	return h.provisioner.Delete(ctx, servers[0])
+
+	target := servers[0]
+	message, err := h.provisioner.Delete(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+
+	// The instance is already terminated, so this is reported rather than failed.
+	if err := h.grants.ForgetServer(ctx, target.ServerID); err != nil {
+		log.Printf("couldn't forget the grants on %s: %v", target.ServerID, err)
+		return message + " Who had access to it is still recorded, which needs looking at.", nil
+	}
+	return message, nil
 }
 
 // nameInDNS points each server's record at the address it has just been given. A freshly started

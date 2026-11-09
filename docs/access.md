@@ -41,6 +41,8 @@ One DynamoDB item per user per server, in the table the Control Panel stack crea
 rather than deleting the item, so a user with no items at all is one nobody has decided anything
 about.
 
+Deleting a server removes every grant on it.
+
 Users themselves are only ever in Cognito. The table holds no copy of them beyond an `email` on each item
 for readability, and a user's display name is Cognito's own `name` attribute - a standard optional
 attribute, which is why storing one needs no change to the pool's schema.
@@ -59,7 +61,8 @@ row are what move an existing user.
 
 Creating a server is an admin's to do, except that an admin can tick **May create** against a user on
 the Access page. That lets them create one server: creating it spends the permission and makes them its
-Owner. Deleting stays with admins, so the server outlives the permit until an admin removes it.
+Owner. A new server also takes the defaults for everyone who already holds access to every other
+server. Deleting stays with admins, so the server outlives the permit until an admin removes it.
 
 The permission is an item in the same table under the sort key `#create-permit`, with a `canCreate`
 attribute. It is spent with a conditional update, so two requests at once cannot both spend the same
