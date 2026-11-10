@@ -35,6 +35,10 @@ const localConfigFile = ".env"
 // COGNITO_USER_POOL_ID=eu-central-1_xxxxxxxxx
 // COGNITO_DOMAIN_PREFIX=xxxxxxxxxxxxxx
 //
+// The pool's own domain for the sign-in page. Left blank, the control panel sends people to
+// the prefix domain above.
+// COGNITO_CUSTOM_DOMAIN=auth.example.com
+//
 // The prefix list allowed to reach port 22 on every server, for EC2 Instance Connect. Left blank,
 // no server accepts SSH from anywhere.
 // SSH_PREFIX_LIST=pl-00000000000000000
@@ -93,6 +97,7 @@ type Config struct {
 
 	UserPoolId          string
 	CognitoDomainPrefix string
+	CognitoCustomDomain string
 	CertificateArn      string
 
 	// AuthentikProviderName must match an OIDC provider that already exists on the pool: nothing here
@@ -147,6 +152,7 @@ func LoadConfig() (Config, error) {
 
 		UserPoolId:          requiredEnv("COGNITO_USER_POOL_ID"),
 		CognitoDomainPrefix: requiredEnv("COGNITO_DOMAIN_PREFIX"),
+		CognitoCustomDomain: stringEnv("COGNITO_CUSTOM_DOMAIN", ""),
 
 		AuthentikProviderName: stringEnv("OIDC_PROVIDER_NAME", ""),
 

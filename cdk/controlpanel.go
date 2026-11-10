@@ -362,5 +362,8 @@ func controlPanelConfigJs(config Config, api awsapigateway.RestApi,
 }
 
 func cognitoDomainName(config Config) string {
+	if config.CognitoCustomDomain != "" {
+		return config.CognitoCustomDomain
+	}
 	return fmt.Sprintf("%s.auth.%s.amazoncognito.com", config.CognitoDomainPrefix, config.AwsRegion)
 }
