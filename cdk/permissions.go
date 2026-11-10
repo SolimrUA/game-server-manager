@@ -187,7 +187,7 @@ func addServerCreationPermissions(stack awscdk.Stack, fn awslambda.Function, fle
 
 	add(&awsiam.PolicyStatementProps{
 		Actions:   jsii.Strings("iam:PassRole"),
-		Resources: jsii.Strings(fmt.Sprintf("arn:aws:iam::%s:role/*", account)),
+		Resources: &[]*string{fleet.ServerRoleArn},
 		Conditions: &map[string]interface{}{
 			"StringEquals": map[string]string{"iam:PassedToService": "ec2.amazonaws.com"},
 		},

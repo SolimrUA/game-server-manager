@@ -165,19 +165,6 @@ func attributes(attrs []cognitotypes.AttributeType) map[string]string {
 	return byName
 }
 
-// Groups reads the caller's groups as API Gateway's mapping template renders them. The multi-valued
-// cognito:groups claim arrives as "[admins, users]" rather than JSON, so the brackets are stripped
-// instead of assuming a clean comma list.
-func Groups(claim string) []string {
-	var groups []string
-	for _, g := range strings.Split(strings.Trim(strings.TrimSpace(claim), "[]"), ",") {
-		if g = strings.TrimSpace(g); g != "" {
-			groups = append(groups, g)
-		}
-	}
-	return groups
-}
-
 // IsAdmin reports whether the caller's groups make them an administrator.
 func IsAdmin(groups []string) bool {
 	for _, g := range groups {

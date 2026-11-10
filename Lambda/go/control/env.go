@@ -19,6 +19,7 @@ type settings struct {
 	statusBucket     string
 	accessTable      string
 	userPoolID       string
+	userPoolClientID string
 	stateMachineArn  string
 	backupLambdaName string
 
@@ -45,6 +46,7 @@ func (e *env) read() settings {
 		statusBucket:     e.Require("statusBucket"),
 		accessTable:      e.Optional("accessTable"),
 		userPoolID:       e.Optional("userPoolId"),
+		userPoolClientID: e.Require("userPoolClientId"),
 		stateMachineArn:  e.Require("stepfunctionarn"),
 		backupLambdaName: e.Require("backupLambdaName"),
 

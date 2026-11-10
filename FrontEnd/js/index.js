@@ -1186,7 +1186,7 @@ function mcShowPasswordState(instanceId, input, revealBtn) {
 
 function showAlert(text) {
   var al = document.getElementsByClassName("alert");
-  document.getElementsByClassName("alertmsg")[0].innerHTML = text;
+  document.getElementsByClassName("alertmsg")[0].textContent = text;
   al[0].style.display = 'block';
 }
 

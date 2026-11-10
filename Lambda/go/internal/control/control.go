@@ -24,9 +24,12 @@ type Request struct {
 	TagName  string `json:"tagName"`
 	TagValue string `json:"tagValue"`
 
-	// Groups and Sub come from the Cognito authorizer and say who is asking.
-	Groups string `json:"groups"`
-	Sub    string `json:"sub"`
+	Token string `json:"token"`
+
+	// Sub and Groups say who is asking. They are filled from the verified token and cannot be
+	// unmarshalled, so a caller invoking this function directly cannot claim to be someone else.
+	Sub    string   `json:"-"`
+	Groups []string `json:"-"`
 
 	// InstanceID restricts the action to one server instead of every one the caller can see.
 	InstanceID string `json:"instanceId"`
@@ -185,6 +188,13 @@ func (h *Handler) Handle(ctx context.Context, req Request) (any, error) {
 		return nil, fmt.Errorf("unknown command %q", req.Command)
 	}
 
+	claims, err := h.auth.Verify(ctx, req.Token)
+	if err != nil {
+		log.Printf("refusing %s: %v", req.Command, err)
+		return nil, errors.New("not signed in")
+	}
+	req.Sub, req.Groups = claims.Sub, claims.Groups
+
 	who, err := h.who(ctx, req)
 	if err != nil {
 		return nil, err
@@ -239,7 +249,7 @@ func refused(message string, info Info) []any {
 }
 
 func (h *Handler) who(ctx context.Context, req Request) (caller, error) {
-	who := caller{sub: req.Sub, isAdmin: access.IsAdmin(access.Groups(req.Groups))}
+	who := caller{sub: req.Sub, isAdmin: access.IsAdmin(req.Groups)}
 	if who.isAdmin {
 		return who, nil
 	}

@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -21,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"personal-game-server-manager/lambda/internal/access"
+	"personal-game-server-manager/lambda/internal/auth"
 	"personal-game-server-manager/lambda/internal/control"
 	"personal-game-server-manager/lambda/internal/provision"
 	"personal-game-server-manager/lambda/internal/remote"
@@ -52,6 +54,8 @@ func main() {
 	launcher := afterLaunch{sfn: sfn.NewFromConfig(cfg), stateMachineArn: settings.stateMachineArn}
 
 	h := control.NewHandler(control.Dependencies{
+		Auth: auth.NewVerifier(os.Getenv("AWS_REGION"), settings.userPoolID,
+			settings.userPoolClientID),
 		EC2:       ec2Client,
 		Backup:    backup.NewFromConfig(cfg),
 		Backups:   backupLambda{lambda: awslambda.NewFromConfig(cfg), name: settings.backupLambdaName},

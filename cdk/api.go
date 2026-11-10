@@ -85,11 +85,9 @@ var paramNames = map[string]string{
 	"volumeid":     "volumeId",
 }
 
-// RequestTemplate builds the mapping template that turns a request into the Lambda's event. The groups
-// and sub claims come from the Cognito authorizer; the Lambda needs sub to resolve per-server access.
-//
-// API Gateway renders the multi-valued cognito:groups claim as the string "[admins, users]" rather than
-// JSON, which is why the Lambda strips brackets instead of parsing it.
+// RequestTemplate builds the mapping template that turns a request into the Lambda's event. The
+// Lambda verifies the caller's token itself, so identity does not depend on what reaches it in the
+// payload.
 func (e Endpoint) RequestTemplate() string {
 	lines := []string{
 		fmt.Sprintf(`"command": "%s"`, e.Command),
@@ -103,10 +101,7 @@ func (e Endpoint) RequestTemplate() string {
 		}
 		lines = append(lines, fmt.Sprintf(`"%s": "$input.params('%s')"`, field, p))
 	}
-	lines = append(lines,
-		`"groups": "$context.authorizer.claims.get('cognito:groups')"`,
-		`"sub": "$context.authorizer.claims.sub"`,
-	)
+	lines = append(lines, `"token": "$input.params('Authorization')"`)
 	if e.Post {
 		// Unquoted on purpose: $input.json emits JSON, so quoting it would nest a string.
 		lines = append(lines, `"body": $input.json('$')`)

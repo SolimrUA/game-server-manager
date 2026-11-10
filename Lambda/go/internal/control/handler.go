@@ -14,6 +14,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"personal-game-server-manager/lambda/internal/access"
+	"personal-game-server-manager/lambda/internal/auth"
 	"personal-game-server-manager/lambda/internal/provision"
 	"personal-game-server-manager/lambda/internal/remote"
 	"personal-game-server-manager/lambda/internal/server"
@@ -64,6 +65,7 @@ type Config struct {
 }
 
 type Handler struct {
+	auth        *auth.Verifier
 	ec2         EC2
 	backup      Backup
 	backups     Backups
@@ -79,6 +81,7 @@ type Handler struct {
 
 // Dependencies is everything the handler acts through.
 type Dependencies struct {
+	Auth        *auth.Verifier
 	EC2         EC2
 	Backup      Backup
 	Backups     Backups
@@ -94,6 +97,7 @@ type Dependencies struct {
 
 func NewHandler(deps Dependencies) *Handler {
 	return &Handler{
+		auth:        deps.Auth,
 		ec2:         deps.EC2,
 		backup:      deps.Backup,
 		backups:     deps.Backups,

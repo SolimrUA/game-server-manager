@@ -16,7 +16,7 @@ import (
 func serverOptions(ctx context.Context, h *Handler, req Request, servers []server.Server) (any, error) {
 	options := h.provisioner.Options(ctx)
 	options.GameVersions = h.gameVersions(ctx, servers)
-	if access.IsAdmin(access.Groups(req.Groups)) {
+	if access.IsAdmin(req.Groups) {
 		return options, nil
 	}
 
@@ -70,7 +70,7 @@ func (h *Handler) versionLastReported(ctx context.Context, s server.Server) stri
 // made. Their permission to make it is spent first: spending it is what stops two requests at once
 // from getting two servers out of one permit.
 func createServer(ctx context.Context, h *Handler, req Request, _ []server.Server) (any, error) {
-	isAdmin := access.IsAdmin(access.Groups(req.Groups))
+	isAdmin := access.IsAdmin(req.Groups)
 	if !isAdmin {
 		spent, err := h.grants.ConsumePermit(ctx, req.Sub)
 		if err != nil {

@@ -24,6 +24,7 @@ type FleetStackProps struct {
 type Fleet struct {
 	Stack              awscdk.Stack
 	InstanceProfileArn *string
+	ServerRoleArn      *string
 	SecurityGroupIds   map[string]*string
 	BackupVaultName    *string
 	BackupVaultArn     *string
@@ -45,7 +46,7 @@ func NewFleetStack(scope constructs.Construct, id string, props *FleetStackProps
 		AvailabilityZones: jsii.Strings(*awscdk.Fn_ImportValue(jsii.String("common-infra-subnet-az"))),
 	})
 
-	profile := addServerRole(stack, statusBucketName)
+	profile, serverRole := addServerRole(stack, statusBucketName)
 	groups := addSecurityGroups(stack, vpc, config)
 	vault, backupRole := addBackups(stack, config)
 	backupLambda := addServerBackups(stack, config, statusBucketName, vault, backupRole)
@@ -54,6 +55,7 @@ func NewFleetStack(scope constructs.Construct, id string, props *FleetStackProps
 	return Fleet{
 		Stack:              stack,
 		InstanceProfileArn: profile.InstanceProfileArn(),
+		ServerRoleArn:      serverRole.RoleArn(),
 		SecurityGroupIds:   groups,
 		BackupVaultName:    vault.BackupVaultName(),
 		BackupVaultArn:     vault.BackupVaultArn(),
@@ -63,7 +65,7 @@ func NewFleetStack(scope constructs.Construct, id string, props *FleetStackProps
 
 // addServerRole creates the role every game server runs under. Its grants cover the status and
 // world-download prefixes, and the join-password parameters, for every server.
-func addServerRole(stack awscdk.Stack, statusBucketName *string) awsiam.InstanceProfile {
+func addServerRole(stack awscdk.Stack, statusBucketName *string) (awsiam.InstanceProfile, awsiam.Role) {
 	role := awsiam.NewRole(stack, jsii.String("GameServerRole"), &awsiam.RoleProps{
 		AssumedBy:   awsiam.NewServicePrincipal(jsii.String("ec2.amazonaws.com"), nil),
 		Description: jsii.String("Role every game server instance runs under"),
@@ -87,9 +89,10 @@ func addServerRole(stack awscdk.Stack, statusBucketName *string) awsiam.Instance
 		},
 	}))
 
-	return awsiam.NewInstanceProfile(stack, jsii.String("GameServerInstanceProfile"), &awsiam.InstanceProfileProps{
+	profile := awsiam.NewInstanceProfile(stack, jsii.String("GameServerInstanceProfile"), &awsiam.InstanceProfileProps{
 		Role: role,
 	})
+	return profile, role
 }
 
 // addSecurityGroups gives each game its own group for its ports. Servers of the same game share one.

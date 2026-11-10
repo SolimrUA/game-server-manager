@@ -2,6 +2,8 @@ module personal-game-server-manager/lambda
 
 go 1.25.0
 
+toolchain go1.26.9
+
 require (
 	github.com/aws/aws-lambda-go v1.49.0
 	github.com/aws/aws-sdk-go-v2 v1.47.4
@@ -34,4 +36,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.38.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.5 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 )

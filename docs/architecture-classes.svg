@@ -1,40 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2552" height="1319.5" viewBox="0 0 2552 1319.5" font-family="Helvetica Neue,Arial,sans-serif">
-<rect width="2552" height="1319.5" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="2552" height="1379.5" viewBox="0 0 2552 1379.5" font-family="Helvetica Neue,Arial,sans-serif">
+<rect width="2552" height="1379.5" fill="#ffffff"/>
 <text x="96" y="100" font-size="24" font-weight="700" fill="#16202b">Personal Game Server Manager &#8212; Lambda classes</text>
-<path d="M 1276,253 L 1276,217" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
-<path d="M 1280.5,227.0 L 1276.0,217.0 L 1271.5,227.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1276,387 L 1276,423" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
-<path d="M 1271.5,413.0 L 1276.0,423.0 L 1280.5,413.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1126,504 L 982,504 L 982,546 L 911,546" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
-<path d="M 921.0,542.0 L 911.0,546.5 L 921.0,551.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1126,280 L 958,280 L 958,218 L 911,218" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
-<path d="M 921.0,213.8 L 911.0,218.2 L 921.0,222.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1126,300 L 1006,300 L 1006,368 L 911,368" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
-<path d="M 921.0,363.0 L 911.0,367.5 L 921.0,372.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1126,320 L 1030,320 L 1030,755 L 911,755" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
-<path d="M 921.0,750.8 L 911.0,755.2 L 921.0,759.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1126,340 L 1054,340 L 1054,925 L 911,925" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
-<path d="M 921.0,920.8 L 911.0,925.2 L 921.0,929.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1126,360 L 1078,360 L 1078,1064 L 911,1064" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
-<path d="M 921.0,1059.8 L 911.0,1064.2 L 921.0,1068.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 611,218 L 480,218 L 480,643 L 396,643" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 1276,268 L 1276,232" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 1280.5,242.5 L 1276.0,232.5 L 1271.5,242.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1276,402 L 1276,438" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 1271.5,428.5 L 1276.0,438.5 L 1280.5,428.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,520 L 994,520 L 994,688 L 911,688" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 921.0,683.5 L 911.0,688.0 L 921.0,692.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,286 L 946,286 L 946,203 L 911,203" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 921.0,198.2 L 911.0,202.8 L 921.0,207.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 611,203 L 540,203 L 540,1107 L 396,1107" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 406.0,1102.5 L 396.0,1107.0 L 406.0,1111.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,306 L 970,306 L 970,360 L 911,360" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 921.0,355.2 L 911.0,359.8 L 921.0,364.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,326 L 1018,326 L 1018,509 L 911,509" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 921.0,504.5 L 911.0,509.0 L 921.0,513.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,346 L 1042,346 L 1042,897 L 911,897" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 921.0,892.2 L 911.0,896.8 L 921.0,901.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,366 L 1066,366 L 1066,1067 L 911,1067" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 921.0,1062.2 L 911.0,1066.8 L 921.0,1071.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 1126,386 L 1090,386 L 1090,1206 L 911,1206" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 921.0,1201.2 L 911.0,1205.8 L 921.0,1210.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 611,360 L 492,360 L 492,643 L 396,643" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 406.0,638.2 L 396.0,642.8 L 406.0,647.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
 <path d="M 246,696 L 246,782" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 241.5,771.5 L 246.0,781.5 L 250.5,771.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 396,833 L 504,833 L 504,546 L 611,546" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
-<path d="M 601.0,551.0 L 611.0,546.5 L 601.0,542.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 611,368 L 528,368 L 528,973 L 396,973" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 396,833 L 468,833 L 468,688 L 611,688" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 601.0,692.5 L 611.0,688.0 L 601.0,683.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
+<path d="M 611,509 L 516,509 L 516,973 L 396,973" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 406.0,968.8 L 396.0,973.2 L 406.0,977.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,280 L 1463,280 L 1463,156 L 1641,156" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 1426,296 L 1463,296 L 1463,156 L 1641,156" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 1631.0,161.0 L 1641.0,156.5 L 1631.0,152.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,300 L 1627,300 L 1627,336 L 1641,336" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 1426,316 L 1627,316 L 1627,336 L 1641,336" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
 <path d="M 1631.0,340.0 L 1641.0,335.5 L 1631.0,331.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,320 L 1557,320 L 1557,507 L 1641,507" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 1426,336 L 1557,336 L 1557,507 L 1641,507" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 1631.0,511.2 L 1641.0,506.8 L 1631.0,502.2" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,340 L 1534,340 L 1534,638 L 1641,638" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 1426,356 L 1534,356 L 1534,638 L 1641,638" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 1631.0,642.8 L 1641.0,638.2 L 1631.0,633.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,360 L 1510,360 L 1510,826 L 1641,826" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
-<polygon points="1426.0,360.0 1432.5,364.3 1439.0,360.0 1432.5,355.7" fill="#fff" stroke="#44566a" stroke-width="1.5"/>
+<path d="M 1426,376 L 1510,376 L 1510,826 L 1641,826" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<polygon points="1426.0,375.5 1432.5,379.8 1439.0,375.5 1432.5,371.2" fill="#fff" stroke="#44566a" stroke-width="1.5"/>
 <path d="M 1941,152 L 2156,152" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 2146.0,156.0 L 2156.0,151.5 L 2146.0,147.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
 <path d="M 1941,166 L 2012,166 L 2012,297 L 2156,297" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
@@ -51,28 +55,30 @@
 <polygon points="1941.0,815.8 1947.5,820.0 1954.0,815.8 1947.5,811.5" fill="#44566a" stroke="#44566a" stroke-width="1.5"/>
 <path d="M 1941,836 L 2108,836 L 2108,884 L 2156,884" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <polygon points="1941.0,835.8 1947.5,840.0 1954.0,835.8 1947.5,831.5" fill="#44566a" stroke="#44566a" stroke-width="1.5"/>
-<path d="M 1426,683 L 1440,683 L 1440,658 L 1641,658" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M 1426,698 L 1440,698 L 1440,658 L 1641,658" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round"/>
 <path d="M 1631.0,662.8 L 1641.0,658.2 L 1631.0,653.8" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,703 L 1487,703 L 1487,1236 L 2306,1236 L 2306,930" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 1426,718 L 1487,718 L 1487,1296 L 2306,1296 L 2306,930" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
 <path d="M 2310.5,939.5 L 2306.0,929.5 L 2301.5,939.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,881 L 1580,881 L 1580,1002 L 1641,1002" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 1426,896 L 1580,896 L 1580,1002 L 1641,1002" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
 <path d="M 1631.0,1006.5 L 1641.0,1002.0 L 1631.0,997.5" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<path d="M 1426,1056 L 1604,1056 L 1604,1140 L 1641,1140" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<path d="M 1426,1071 L 1604,1071 L 1604,1140 L 1641,1140" fill="none" stroke="#44566a" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 5"/>
 <path d="M 1631.0,1144.0 L 1641.0,1139.5 L 1631.0,1135.0" fill="none" stroke="#44566a" stroke-width="1.6"/>
-<text x="1305" y="238" font-size="12.2" fill="#44566a" text-anchor="middle">answers</text>
-<text x="1314" y="408" font-size="12.2" fill="#44566a" text-anchor="middle">dispatches</text>
-<text x="947" y="538" font-size="12.2" fill="#44566a" text-anchor="middle">needs</text>
-<text x="943" y="210" font-size="12.2" fill="#44566a" text-anchor="middle">grants</text>
-<text x="942" y="359" font-size="12.2" fill="#44566a" text-anchor="middle">names</text>
-<text x="971" y="747" font-size="12.2" fill="#44566a" text-anchor="middle">instances</text>
-<text x="983" y="917" font-size="12.2" fill="#44566a" text-anchor="middle">recovery points</text>
-<text x="965" y="1056" font-size="12.2" fill="#44566a" text-anchor="middle">signed URLs</text>
-<text x="453" y="658" font-size="12.2" fill="#44566a" text-anchor="middle">0..*  stores</text>
+<text x="1305" y="254" font-size="12.2" fill="#44566a" text-anchor="middle">answers</text>
+<text x="1314" y="424" font-size="12.2" fill="#44566a" text-anchor="middle">dispatches</text>
+<text x="953" y="680" font-size="12.2" fill="#44566a" text-anchor="middle">needs</text>
+<text x="994" y="219" font-size="12.2" fill="#44566a" text-anchor="middle">who is asking</text>
+<text x="442" y="1098" font-size="12.2" fill="#44566a" text-anchor="middle">reports</text>
+<text x="951" y="375" font-size="12.2" fill="#44566a" text-anchor="middle">grants</text>
+<text x="945" y="500" font-size="12.2" fill="#44566a" text-anchor="middle">names</text>
+<text x="953" y="888" font-size="12.2" fill="#44566a" text-anchor="middle">instances</text>
+<text x="989" y="1058" font-size="12.2" fill="#44566a" text-anchor="middle">recovery points</text>
+<text x="968" y="1197" font-size="12.2" fill="#44566a" text-anchor="middle">signed URLs</text>
+<text x="461" y="658" font-size="12.2" fill="#44566a" text-anchor="middle">0..*  stores</text>
 <text x="269" y="757" font-size="12.2" fill="#44566a" text-anchor="middle">names</text>
-<text x="447" y="745" font-size="12.2" fill="#44566a" text-anchor="middle">1..*  expands to</text>
-<text x="462" y="965" font-size="12.2" fill="#44566a" text-anchor="middle">0..*  reads</text>
+<text x="411" y="738" font-size="12.2" fill="#44566a" text-anchor="middle">1..*  expands to</text>
+<text x="456" y="965" font-size="12.2" fill="#44566a" text-anchor="middle">0..*  reads</text>
 <text x="1584" y="148" font-size="12.2" fill="#44566a" text-anchor="middle">creates</text>
-<text x="1607" y="333" font-size="12.2" fill="#44566a" text-anchor="middle">asks</text>
+<text x="1607" y="336" font-size="12.2" fill="#44566a" text-anchor="middle">asks</text>
 <text x="1614" y="498" font-size="12.2" fill="#44566a" text-anchor="middle">runs</text>
 <text x="1587" y="630" font-size="12.2" fill="#44566a" text-anchor="middle">reads status</text>
 <text x="1576" y="817" font-size="12.2" fill="#44566a" text-anchor="middle">0..*  may see</text>
@@ -83,9 +89,9 @@
 <text x="2095" y="776" font-size="12.2" fill="#44566a" text-anchor="middle">reported</text>
 <text x="2116" y="900" font-size="12.2" fill="#44566a" text-anchor="middle">ec2 tags</text>
 <text x="1609" y="674" font-size="12.2" fill="#44566a" text-anchor="middle">same</text>
-<text x="2341" y="982" font-size="12.2" fill="#44566a" text-anchor="middle">idle tags</text>
+<text x="2341" y="992" font-size="12.2" fill="#44566a" text-anchor="middle">idle tags</text>
 <text x="1600" y="1018" font-size="12.2" fill="#44566a" text-anchor="middle">helpers</text>
-<text x="1565" y="1130" font-size="12.2" fill="#44566a" text-anchor="middle">retried on</text>
+<text x="1565" y="1132" font-size="12.2" fill="#44566a" text-anchor="middle">retried on</text>
 <rect x="96" y="590" width="300" height="106" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
 <rect x="96" y="590" width="300" height="4" rx="2" fill="#8957e5"/>
 <text x="246.0" y="624" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Grant</text>
@@ -107,115 +113,129 @@
 <text x="106" y="986" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Sub string</text>
 <text x="106" y="1002" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Name string</text>
 <text x="106" y="1018" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Admin bool</text>
-<rect x="611" y="150" width="300" height="136" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
-<rect x="611" y="150" width="300" height="4" rx="2" fill="#8957e5"/>
-<text x="761.0" y="184" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Store</text>
-<line x1="611" y1="199" x2="911" y2="199" stroke="#8957e5" stroke-opacity=".45" stroke-width="1"/>
-<text x="621" y="216" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+RolesFor(userSub) Access</text>
-<text x="621" y="232" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Save(changes, callerSub) error</text>
-<text x="621" y="247" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Defaults() Defaults</text>
-<text x="621" y="262" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ApplyDefaultsTo(serverID) error</text>
-<text x="621" y="278" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ForgetServer(serverID) error</text>
-<rect x="611" y="322" width="300" height="90" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
-<rect x="611" y="322" width="300" height="4" rx="2" fill="#8957e5"/>
-<text x="761.0" y="356" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Directory</text>
-<line x1="611" y1="372" x2="911" y2="372" stroke="#8957e5" stroke-opacity=".45" stroke-width="1"/>
-<text x="621" y="388" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Users() []User</text>
-<text x="621" y="404" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Rename(names) int</text>
-<rect x="611" y="448" width="300" height="196" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
-<rect x="611" y="448" width="300" height="4" rx="2" fill="#8957e5"/>
-<text x="761.0" y="472" font-size="11.5" fill="#8957e5" text-anchor="middle">&#171;enumeration&#187;</text>
-<text x="761.0" y="496" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Capability</text>
-<line x1="611" y1="510" x2="911" y2="510" stroke="#8957e5" stroke-opacity=".45" stroke-width="1"/>
-<text x="621" y="528" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">view</text>
-<text x="621" y="543" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">lifecycle</text>
-<text x="621" y="558" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">download</text>
-<text x="621" y="574" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">content</text>
-<text x="621" y="590" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">backup</text>
-<text x="621" y="605" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">password</text>
-<text x="621" y="620" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">autoshutdown</text>
-<text x="621" y="636" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">resize</text>
-<rect x="611" y="680" width="300" height="150" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="611" y="680" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="761.0" y="704" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;interface&#187;</text>
-<text x="761.0" y="728" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">EC2Instances</text>
-<line x1="611" y1="742" x2="911" y2="742" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="621" y="760" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+DescribeInstances()</text>
-<text x="621" y="775" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+StartInstances()</text>
-<text x="621" y="790" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+StopInstances()</text>
-<text x="621" y="806" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ModifyInstanceAttribute()</text>
-<text x="621" y="822" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+CreateTags()</text>
-<rect x="611" y="866" width="300" height="118" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="611" y="866" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="761.0" y="889" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;interface&#187;</text>
-<text x="761.0" y="913" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Vault</text>
-<line x1="611" y1="928" x2="911" y2="928" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="621" y="945" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ListRecoveryPointsByBackupVault()</text>
-<text x="621" y="960" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+UpdateRecoveryPointLifecycle()</text>
-<text x="621" y="976" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+DeleteRecoveryPoint()</text>
-<rect x="611" y="1020" width="300" height="88" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="611" y="1020" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="761.0" y="1044" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;interface&#187;</text>
-<text x="761.0" y="1068" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Downloads</text>
-<line x1="611" y1="1082" x2="911" y2="1082" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="621" y="1100" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+PresignGetObject(bucket, key) string</text>
-<rect x="1126" y="96" width="300" height="121" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="611" y="150" width="300" height="106" rx="5" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+<rect x="611" y="150" width="300" height="4" rx="2" fill="#475569"/>
+<text x="761.0" y="184" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Verifier</text>
+<line x1="611" y1="199" x2="911" y2="199" stroke="#475569" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="216" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Verify(token) Claims</text>
+<text x="621" y="232" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-key() Keyfunc</text>
+<text x="621" y="247" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-fetch() error</text>
+<rect x="96" y="1062" width="300" height="90" rx="5" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+<rect x="96" y="1062" width="300" height="4" rx="2" fill="#475569"/>
+<text x="246.0" y="1096" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Claims</text>
+<line x1="96" y1="1111" x2="396" y2="1111" stroke="#475569" stroke-opacity=".45" stroke-width="1"/>
+<text x="106" y="1128" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Sub string</text>
+<text x="106" y="1144" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Groups []string</text>
+<rect x="611" y="292" width="300" height="136" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
+<rect x="611" y="292" width="300" height="4" rx="2" fill="#8957e5"/>
+<text x="761.0" y="326" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Store</text>
+<line x1="611" y1="340" x2="911" y2="340" stroke="#8957e5" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="358" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+RolesFor(userSub) Access</text>
+<text x="621" y="373" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Save(changes, callerSub) error</text>
+<text x="621" y="388" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Defaults() Defaults</text>
+<text x="621" y="404" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ApplyDefaultsTo(serverID) error</text>
+<text x="621" y="420" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ForgetServer(serverID) error</text>
+<rect x="611" y="464" width="300" height="90" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
+<rect x="611" y="464" width="300" height="4" rx="2" fill="#8957e5"/>
+<text x="761.0" y="498" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Directory</text>
+<line x1="611" y1="513" x2="911" y2="513" stroke="#8957e5" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="530" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Users() []User</text>
+<text x="621" y="546" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Rename(names) int</text>
+<rect x="611" y="590" width="300" height="196" rx="5" fill="#fff" stroke="#8957e5" stroke-width="1.5"/>
+<rect x="611" y="590" width="300" height="4" rx="2" fill="#8957e5"/>
+<text x="761.0" y="613" font-size="11.5" fill="#8957e5" text-anchor="middle">&#171;enumeration&#187;</text>
+<text x="761.0" y="637" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Capability</text>
+<line x1="611" y1="652" x2="911" y2="652" stroke="#8957e5" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="669" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">view</text>
+<text x="621" y="684" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">lifecycle</text>
+<text x="621" y="700" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">download</text>
+<text x="621" y="716" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">content</text>
+<text x="621" y="731" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">backup</text>
+<text x="621" y="746" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">password</text>
+<text x="621" y="762" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">autoshutdown</text>
+<text x="621" y="778" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">resize</text>
+<rect x="611" y="822" width="300" height="150" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="611" y="822" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="761.0" y="845" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;interface&#187;</text>
+<text x="761.0" y="869" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">EC2Instances</text>
+<line x1="611" y1="884" x2="911" y2="884" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="901" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+DescribeInstances()</text>
+<text x="621" y="916" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+StartInstances()</text>
+<text x="621" y="932" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+StopInstances()</text>
+<text x="621" y="948" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ModifyInstanceAttribute()</text>
+<text x="621" y="963" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+CreateTags()</text>
+<rect x="611" y="1008" width="300" height="118" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="611" y="1008" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="761.0" y="1030" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;interface&#187;</text>
+<text x="761.0" y="1054" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Vault</text>
+<line x1="611" y1="1070" x2="911" y2="1070" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="1086" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+ListRecoveryPointsByBackupVault()</text>
+<text x="621" y="1102" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+UpdateRecoveryPointLifecycle()</text>
+<text x="621" y="1118" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+DeleteRecoveryPoint()</text>
+<rect x="611" y="1162" width="300" height="88" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="611" y="1162" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="761.0" y="1185" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;interface&#187;</text>
+<text x="761.0" y="1209" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Downloads</text>
+<line x1="611" y1="1224" x2="911" y2="1224" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="621" y="1241" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+PresignGetObject(bucket, key) string</text>
+<rect x="1126" y="96" width="300" height="136" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
 <rect x="1126" y="96" width="300" height="4" rx="2" fill="#1f6feb"/>
 <text x="1276.0" y="130" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Request</text>
 <line x1="1126" y1="145" x2="1426" y2="145" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
 <text x="1136" y="162" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Command string</text>
 <text x="1136" y="178" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+InstanceID string</text>
-<text x="1136" y="193" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+UserSub string</text>
-<text x="1136" y="208" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Groups []string</text>
-<rect x="1126" y="253" width="300" height="134" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="1126" y="253" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="1276.0" y="276" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;control lambda&#187;</text>
-<text x="1276.0" y="300" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Handler</text>
-<line x1="1126" y1="315" x2="1426" y2="315" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="332" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Handle(Request) any</text>
-<text x="1136" y="348" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-who(Request) caller</text>
-<text x="1136" y="363" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-visible(Request, caller) []Server</text>
-<text x="1136" y="378" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-describe(Server, launchedAt)</text>
-<rect x="1126" y="423" width="300" height="162" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="1126" y="423" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="1276.0" y="457" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">command</text>
-<line x1="1126" y1="472" x2="1426" y2="472" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="489" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+adminOnly bool</text>
-<text x="1136" y="504" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+mayCreate bool</text>
-<text x="1136" y="520" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+openToAll bool</text>
-<text x="1136" y="536" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+fleetWide bool</text>
-<text x="1136" y="551" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+needs Capability</text>
-<line x1="1126" y1="560" x2="1426" y2="560" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="576" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+run()</text>
-<rect x="1126" y="621" width="300" height="144" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="1126" y="621" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="1276.0" y="644" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;idleshutdown lambda&#187;</text>
-<text x="1276.0" y="668" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">IdleShutdown</text>
-<line x1="1126" y1="683" x2="1426" y2="683" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="700" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-managedTag string</text>
-<line x1="1126" y1="708" x2="1426" y2="708" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="726" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+handle() error</text>
-<text x="1136" y="741" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-running() []Instance</text>
-<text x="1136" y="756" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-check(instance) error</text>
-<rect x="1126" y="801" width="300" height="160" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="1126" y="801" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="1276.0" y="824" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;backupservers lambda&#187;</text>
-<text x="1276.0" y="848" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">BackupServers</text>
-<line x1="1126" y1="863" x2="1426" y2="863" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="880" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-vaultName string</text>
-<text x="1136" y="896" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-supersededDays int64</text>
-<line x1="1126" y1="904" x2="1426" y2="904" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="921" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+handle(req) string</text>
-<text x="1136" y="936" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-backUpIfChanged(server, force)</text>
-<text x="1136" y="952" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-expire(server, point) error</text>
-<rect x="1126" y="996" width="300" height="118" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
-<rect x="1126" y="996" width="300" height="4" rx="2" fill="#1f6feb"/>
-<text x="1276.0" y="1020" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;updatedns lambda&#187;</text>
-<text x="1276.0" y="1044" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">UpdateDns</text>
-<line x1="1126" y1="1058" x2="1426" y2="1058" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
-<text x="1136" y="1076" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+handle(req) error</text>
-<text x="1136" y="1091" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-publicAddress(instanceID) string</text>
-<text x="1136" y="1106" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-point(req, address) error</text>
+<text x="1136" y="193" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Token string</text>
+<text x="1136" y="208" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-Sub string</text>
+<text x="1136" y="224" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-Groups []string</text>
+<rect x="1126" y="268" width="300" height="134" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="1126" y="268" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="1276.0" y="292" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;control lambda&#187;</text>
+<text x="1276.0" y="316" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Handler</text>
+<line x1="1126" y1="330" x2="1426" y2="330" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="348" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+Handle(Request) any</text>
+<text x="1136" y="363" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-who(Request) caller</text>
+<text x="1136" y="378" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-visible(Request, caller) []Server</text>
+<text x="1136" y="394" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-describe(Server, launchedAt)</text>
+<rect x="1126" y="438" width="300" height="162" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="1126" y="438" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="1276.0" y="472" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">command</text>
+<line x1="1126" y1="488" x2="1426" y2="488" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="504" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+adminOnly bool</text>
+<text x="1136" y="520" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+mayCreate bool</text>
+<text x="1136" y="536" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+openToAll bool</text>
+<text x="1136" y="551" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+fleetWide bool</text>
+<text x="1136" y="566" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+needs Capability</text>
+<line x1="1126" y1="575" x2="1426" y2="575" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="592" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+run()</text>
+<rect x="1126" y="636" width="300" height="144" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="1126" y="636" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="1276.0" y="660" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;idleshutdown lambda&#187;</text>
+<text x="1276.0" y="684" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">IdleShutdown</text>
+<line x1="1126" y1="698" x2="1426" y2="698" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="716" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-managedTag string</text>
+<line x1="1126" y1="724" x2="1426" y2="724" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="741" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+handle() error</text>
+<text x="1136" y="756" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-running() []Instance</text>
+<text x="1136" y="772" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-check(instance) error</text>
+<rect x="1126" y="816" width="300" height="160" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="1126" y="816" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="1276.0" y="840" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;backupservers lambda&#187;</text>
+<text x="1276.0" y="864" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">BackupServers</text>
+<line x1="1126" y1="878" x2="1426" y2="878" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="896" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-vaultName string</text>
+<text x="1136" y="911" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-supersededDays int64</text>
+<line x1="1126" y1="920" x2="1426" y2="920" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="936" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+handle(req) string</text>
+<text x="1136" y="952" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-backUpIfChanged(server, force)</text>
+<text x="1136" y="968" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-expire(server, point) error</text>
+<rect x="1126" y="1012" width="300" height="118" rx="5" fill="#fff" stroke="#1f6feb" stroke-width="1.5"/>
+<rect x="1126" y="1012" width="300" height="4" rx="2" fill="#1f6feb"/>
+<text x="1276.0" y="1035" font-size="11.5" fill="#1f6feb" text-anchor="middle">&#171;updatedns lambda&#187;</text>
+<text x="1276.0" y="1059" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">UpdateDns</text>
+<line x1="1126" y1="1074" x2="1426" y2="1074" stroke="#1f6feb" stroke-opacity=".45" stroke-width="1"/>
+<text x="1136" y="1091" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+handle(req) error</text>
+<text x="1136" y="1106" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-publicAddress(instanceID) string</text>
+<text x="1136" y="1122" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">-point(req, address) error</text>
 <rect x="1641" y="96" width="300" height="121" rx="5" fill="#fff" stroke="#1a7f5a" stroke-width="1.5"/>
 <rect x="1641" y="96" width="300" height="4" rx="2" fill="#1a7f5a"/>
 <text x="1791.0" y="130" font-size="15.5" font-weight="700" fill="#16202b" text-anchor="middle">Provisioner</text>
@@ -316,6 +336,6 @@
 <line x1="2156" y1="888" x2="2456" y2="888" stroke="#be185d" stroke-opacity=".45" stroke-width="1"/>
 <text x="2166" y="906" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+TagsOf(instance) Tags</text>
 <text x="2166" y="921" font-size="11.4" fill="#2d3b4a" font-family="SFMono-Regular,Consolas,monospace">+IdleShutdownStatus() string</text>
-<text x="96" y="1255.5" font-size="12.5" fill="#5d6b7a">Solid arrow: association. Dashed arrow: dependency. Dashed hollow triangle: implements. Filled diamond: composition. Hollow diamond: aggregation.</text>
-<text x="96" y="1275.5" font-size="12.5" fill="#5d6b7a">Box colour is the package. Member lists are trimmed, and the ctx argument is left out of every signature.</text>
+<text x="96" y="1315.5" font-size="12.5" fill="#5d6b7a">Solid arrow: association. Dashed arrow: dependency. Dashed hollow triangle: implements. Filled diamond: composition. Hollow diamond: aggregation.</text>
+<text x="96" y="1335.5" font-size="12.5" fill="#5d6b7a">Box colour is the package. Member lists are trimmed, and the ctx argument is left out of every signature.</text>
 </svg>
