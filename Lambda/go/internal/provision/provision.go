@@ -140,10 +140,11 @@ const deleteRequestedTag = "delete-requested"
 
 // Options is everything the new-server form needs.
 type Options struct {
-	Templates     []Option `json:"templates"`
-	Backups       []Backup `json:"backups"`
-	InstanceTypes []string `json:"instanceTypes"`
-	MaxServers    int      `json:"maxServers"`
+	Templates     []Option          `json:"templates"`
+	Backups       []Backup          `json:"backups"`
+	InstanceTypes []string          `json:"instanceTypes"`
+	MaxServers    int               `json:"maxServers"`
+	GameVersions  map[string]string `json:"gameVersions"`
 }
 
 // Options lists what a new server can be created as, and from.

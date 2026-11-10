@@ -14,6 +14,15 @@ var mcPasswordShown = {};
 var mcServerOptions = null;
 var mcServerOptionsPromise = null;
 
+function mcNewServerVersion() {
+  var f = mcServerOptionsForm();
+  return f.version.value.trim() || mcSuggestedVersion(f.game.value);
+}
+
+function mcSuggestedVersion(game) {
+  return (mcServerOptions && mcServerOptions.gameVersions && mcServerOptions.gameVersions[game]) || '';
+}
+
 //Fetched once and shared: the request is slow enough to be felt if it starts on the first click.
 function mcLoadServerOptions() {
   if (!mcServerOptionsPromise) {
@@ -65,8 +74,10 @@ function mcSyncNewServerForm() {
   f.version.parentElement.style.display = t.requiresGameVersion ? '' : 'none';
   f.volume.parentElement.style.display = f.reuse.value ? 'none' : '';
   //A hidden field can't be required: the browser refuses to submit and has nothing to point at.
-  f.version.required = t.requiresGameVersion;
-  f.volume.required = !f.reuse.value;
+  //A field with a suggestion to fall back on isn't required either: blank means take the suggestion.
+  var suggested = mcSuggestedVersion(t.game);
+  f.version.required = t.requiresGameVersion && !suggested;
+  f.version.placeholder = suggested;
   f.volume.placeholder = String(t.defaultVolumeSizeGib);
   f.hint.textContent = f.reuse.value
     ? 'The new server starts from that backup. Whatever it came from is left alone.'
@@ -149,17 +160,20 @@ async function createServer() {
       '&game=' + encodeURIComponent(f.game.value) +
       '&serverid=' + encodeURIComponent(f.id.value) +
       '&instancetype=' + encodeURIComponent(f.type.value) +
-      '&gameversion=' + encodeURIComponent(f.version.value) +
+      '&gameversion=' + encodeURIComponent(mcNewServerVersion()) +
       '&volumesize=' + encodeURIComponent(f.reuse.value ? '' : f.volume.value) +
       '&snapshotid=' + encodeURIComponent(f.reuse.value), {
       method: 'get', headers: new Headers({ 'Authorization': jwt })
     });
     var msgdata = await response.json();
     showAlert(msgdata[0]);
-    //Reloaded so the next form offers the backup this may have produced.
-    mcForgetServerOptions();
-    toggleNewServerForm(false);
-    f.id.value = '';
+    //The form stays open on a refusal, so what was filled in can be corrected instead of retyped.
+    if (msgdata[2] !== false) {
+      //Options are reloaded so the next form offers the backup this may have produced.
+      mcForgetServerOptions();
+      toggleNewServerForm(false);
+      f.id.value = '';
+    }
     refreshData();
   } catch (e) {
     console.log(e);
@@ -192,6 +206,10 @@ async function deleteServer(instanceId, label, lastBackup) {
 function mcCan(instance, capability) {
   var capabilities = (instance && instance['Capabilities']) || [];
   return capabilities.indexOf(capability) !== -1;
+}
+
+async function refreshData() {
+  return mcInfo(API_URL, await getJwt());
 }
 
 async function mcInfo(url, idToken) {
@@ -1606,25 +1624,6 @@ async function init() {
       return false   
     }
   } 
-
-
-  async function getJwt2() {
-    var jwt = Auth.currentSession()
-        .then(res=>{
-        
-        let IdToken = res.getIdToken()
-        let resJwt = IdToken.getJwtToken()
-
-        return resJwt
-        })
-        .catch(e => {console.log(e)})
-    return jwt
-  }
-
-  async function refreshData() {
-    var jwt2 = await getJwt2()
-    return mcInfo(API_URL, jwt2);
-  }
 
 
 }

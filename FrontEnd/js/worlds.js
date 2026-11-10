@@ -127,12 +127,14 @@ function renderWorlds() {
   }
 
   var html = '';
-  var server = null;
+  var heading = null;
   mcWorlds.forEach(function (world) {
-    if (world.serverId !== server) {
-      server = world.serverId;
-      html += '<h2 class="mcWorldServer">' + escapeHtml(server || 'Unnamed server') +
-        '<span class="mcMuted mcWorldGame">' + escapeHtml(world.game || '') + '</span></h2>';
+    //One server id can come back running another game, and a world is only readable by its own game.
+    var group = world.serverId + '|' + world.game;
+    if (group !== heading) {
+      heading = group;
+      html += '<h2 class="mcWorldServer">' + escapeHtml(world.serverId || 'Unnamed server') +
+        '<span class="mcMuted mcWorldGame">' + escapeHtml(world.game || 'no recorded game') + '</span></h2>';
     }
     html += mcWorldBlock(world);
   });

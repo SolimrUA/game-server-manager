@@ -4,8 +4,11 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+
+	"github.com/aws/smithy-go"
 
 	"personal-game-server-manager/lambda/internal/access"
 	"personal-game-server-manager/lambda/internal/server"
@@ -196,38 +199,43 @@ func (h *Handler) Handle(ctx context.Context, req Request) (any, error) {
 	if len(servers) == 0 && !c.fleetWide {
 		// With access filtering, "nothing to show" is an ordinary state for a caller who hasn't been
 		// granted anything yet, not an error.
-		return reply("No gaming server instances found", info), nil
+		return refused("No gaming server instances found", info), nil
 	}
 
 	targets, err := target(req, servers)
 	if err != nil {
-		return reply(err.Error(), info), nil
+		return refused(err.Error(), info), nil
 	}
 
 	if err := authorize(c, who, targets); err != nil {
-		return reply(err.Error(), info), nil
+		return refused(err.Error(), info), nil
 	}
 
 	answer, err := c.run(ctx, h, req, targets)
 	if err != nil {
 		if message, ok := usererr.Message(err); ok {
-			return reply(message, info), nil
+			return refused(message, info), nil
 		}
 		log.Printf("%s failed: %v", req.Command, err)
-		return reply(failureMessage(req.Command), info), nil
+		return refused(failureMessage(req.Command, err), info), nil
 	}
 
 	// A command that answered with something of its own, such as a download handle, is returned as it
 	// is; anything else is a message to show with the refreshed state.
 	if message, ok := answer.(string); ok {
-		return reply(message, info), nil
+		return done(message, info), nil
 	}
 	return answer, nil
 }
 
-// reply is the two-element answer the control panel reads: a message, then the current state.
-func reply(message string, info Info) []any {
-	return []any{message, info}
+// done and refused are the answer the control panel reads: a message, the state as it was, and
+// whether the command did what was asked, which a caller branches on rather than reading the message.
+func done(message string, info Info) []any {
+	return []any{message, info, true}
+}
+
+func refused(message string, info Info) []any {
+	return []any{message, info, false}
 }
 
 func (h *Handler) who(ctx context.Context, req Request) (caller, error) {
@@ -321,33 +329,47 @@ func authorize(c command, who caller, targets []server.Server) error {
 
 // failureMessage is what the caller is told when a command failed for a reason that is ours rather
 // than theirs.
-func failureMessage(command string) string {
-	if message, ok := failureMessages[command]; ok {
+func failureMessage(command string, cause error) string {
+	message, named := failureMessages[command]
+	if !named {
+		message = "Something went wrong"
+	}
+	if cause == nil {
 		return message
 	}
-	return "Something went wrong, please try again later"
+	return message + ": " + reason(cause)
+}
+
+// reason prefers an AWS error's code over the sentence beside it, which runs for a paragraph and
+// suggests API calls this panel cannot make.
+func reason(err error) string {
+	var api smithy.APIError
+	if errors.As(err, &api) {
+		return api.ErrorCode()
+	}
+	return err.Error()
 }
 
 var failureMessages = map[string]string{
-	"start":               "Couldn't start server, please try again later",
-	"stop":                "Stopping server failed - please wait a few minutes and try again",
-	"reSize":              "Something went wrong with resizing your server, please try again later",
-	"backupNow":           "Couldn't start backup, please try again later",
-	"pauseIdleShutdown":   "Couldn't pause auto-shutdown, please try again later",
-	"resumeIdleShutdown":  "Couldn't resume auto-shutdown, please try again later",
-	"installMod":          "Couldn't install mod, please try again later",
-	"deleteMod":           "Couldn't delete mod, please try again later",
-	"restartGame":         "Couldn't restart the game, please try again later",
-	"updateGame":          "Couldn't update the game, please try again later",
-	"createServer":        "Couldn't create the server, please try again later",
-	"deleteServer":        "Couldn't delete the server, please try again later",
-	"getWorlds":           "Couldn't list the worlds, please try again later",
-	"setBackupExpiry":     "Couldn't change when that backup expires, please try again later",
-	"setBackupPrimary":    "Couldn't change that backup's status, please try again later",
-	"useVolume":           "Couldn't put the server on that world, please try again later",
-	"retireVolume":        "Couldn't stop backing up that volume, please try again later",
-	"deleteVolume":        "Couldn't delete that volume, please try again later",
-	"deleteVolumeBackups": "Couldn't delete those backups, please try again later",
-	"deleteBackup":        "Couldn't delete that backup, please try again later",
-	"saveAccess":          "Couldn't save access, please try again later",
+	"start":               "Couldn't start server",
+	"stop":                "Stopping server failed",
+	"reSize":              "Something went wrong with resizing your server",
+	"backupNow":           "Couldn't start backup",
+	"pauseIdleShutdown":   "Couldn't pause auto-shutdown",
+	"resumeIdleShutdown":  "Couldn't resume auto-shutdown",
+	"installMod":          "Couldn't install mod",
+	"deleteMod":           "Couldn't delete mod",
+	"restartGame":         "Couldn't restart the game",
+	"updateGame":          "Couldn't update the game",
+	"createServer":        "Couldn't create the server",
+	"deleteServer":        "Couldn't delete the server",
+	"getWorlds":           "Couldn't list the worlds",
+	"setBackupExpiry":     "Couldn't change when that backup expires",
+	"setBackupPrimary":    "Couldn't change that backup's status",
+	"useVolume":           "Couldn't put the server on that world",
+	"retireVolume":        "Couldn't stop backing up that volume",
+	"deleteVolume":        "Couldn't delete that volume",
+	"deleteVolumeBackups": "Couldn't delete those backups",
+	"deleteBackup":        "Couldn't delete that backup",
+	"saveAccess":          "Couldn't save access",
 }

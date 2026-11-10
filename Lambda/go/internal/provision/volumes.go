@@ -158,6 +158,11 @@ func sortedWorlds(worlds map[string]*WorldVolume) []WorldVolume {
 		if sorted[i].ServerID != sorted[j].ServerID {
 			return sorted[i].ServerID < sorted[j].ServerID
 		}
+		// Worlds of the same game sort together, since one server id can have held worlds under more
+		// than one game.
+		if sorted[i].Game != sorted[j].Game {
+			return sorted[i].Game < sorted[j].Game
+		}
 		return newestOf(sorted[i]) > newestOf(sorted[j])
 	})
 	return sorted
@@ -367,12 +372,25 @@ func (p *Provisioner) swappableVolume(ctx context.Context, s server.Server, volu
 	if tagOf(volume.Tags, server.TagServerID) != s.ServerID {
 		return ec2types.Volume{}, usererr.New("That world belongs to a different server")
 	}
+	// A server id outlives the server, so the same id can come back running another game, which
+	// cannot read the world on this disk.
+	if game := tagOf(volume.Tags, server.TagGameName); game != s.GameName {
+		return ec2types.Volume{}, usererr.Newf("That world is %s's and this server runs %s",
+			gameLabel(game), gameLabel(s.GameName))
+	}
 	if aws.ToString(volume.AvailabilityZone) != s.AvailabilityZone {
 		return ec2types.Volume{}, usererr.Newf("That world is in %s and the server is in %s, so it can't be "+
 			"attached. Create a server from one of its backups instead.",
 			aws.ToString(volume.AvailabilityZone), s.AvailabilityZone)
 	}
 	return volume, nil
+}
+
+func gameLabel(game string) string {
+	if game == "" {
+		return "no recorded game"
+	}
+	return game
 }
 
 // detachData waits for the disk to come free, since nothing can be attached in its place until it is.

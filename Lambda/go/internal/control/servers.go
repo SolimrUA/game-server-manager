@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"personal-game-server-manager/lambda/internal/access"
 
@@ -12,8 +13,9 @@ import (
 	"personal-game-server-manager/lambda/internal/usererr"
 )
 
-func serverOptions(ctx context.Context, h *Handler, req Request, _ []server.Server) (any, error) {
+func serverOptions(ctx context.Context, h *Handler, req Request, servers []server.Server) (any, error) {
 	options := h.provisioner.Options(ctx)
+	options.GameVersions = h.gameVersions(ctx, servers)
 	if access.IsAdmin(access.Groups(req.Groups)) {
 		return options, nil
 	}
@@ -32,6 +34,36 @@ func serverOptions(ctx context.Context, h *Handler, req Request, _ []server.Serv
 	}
 	options.Backups = theirs
 	return options, nil
+}
+
+// gameVersions is the version to suggest for each game. Nothing records a version to create a server
+// at, so the fleet is the only thing that knows one.
+func (h *Handler) gameVersions(ctx context.Context, servers []server.Server) map[string]string {
+	versions := map[string]string{}
+	for _, s := range servers {
+		if s.GameName == "" || versions[s.GameName] != "" {
+			continue
+		}
+		if version := s.GameStatus.Version(); version != "" {
+			versions[s.GameName] = version
+			continue
+		}
+		if version := h.versionLastReported(ctx, s); version != "" {
+			versions[s.GameName] = version
+		}
+	}
+	return versions
+}
+
+// versionLastReported reads the version out of a stopped server's last status, which is otherwise
+// too stale to show: the server comes back on the version it stopped at.
+func (h *Handler) versionLastReported(ctx context.Context, s server.Server) string {
+	left, err := h.status.Game(ctx, s.StatusKey(), time.Time{})
+	if err != nil {
+		log.Printf("no version left behind by %s: %v", s.Label(), err)
+		return ""
+	}
+	return left.Version()
 }
 
 // createServer builds a server, and hands a user who is not an admin ownership of the one they just

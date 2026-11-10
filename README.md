@@ -116,8 +116,8 @@ each, and is where they are managed: keeping a backup or giving it an expiry, ma
 defunct, deleting backups or a volume outright, and stopping backups of a volume set aside.
 
 **Mount to Server** puts a stopped server back onto one of its own earlier volumes without a rebuild.
-The volume has to be free and in the server's availability zone; a world from elsewhere is reached by
-creating a server from its backup instead.
+The volume has to be free, from the same game, and in the server's availability zone; a world from
+elsewhere is reached by creating a server from its backup instead.
 
 ## Security
 

@@ -32,7 +32,7 @@ func NewReader(client S3, bucket string) *Reader {
 }
 
 // Game reads a server's reported status. A status pushed before the current boot is stale, so it is
-// reported as nothing rather than as the running game's.
+// reported as nothing rather than as the running game's; a zero launchedAt asks for it anyway.
 func (r *Reader) Game(ctx context.Context, key string, launchedAt time.Time) (server.GameStatus, error) {
 	if r.bucket == "" || key == "" {
 		return nil, nil
