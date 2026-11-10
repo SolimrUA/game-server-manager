@@ -20,8 +20,12 @@ behind it.
 Four stacks, none of which contains a game server:
 
 - **Common** ([`cfn/common-infra.yaml`](cfn/common-infra.yaml)) - shared VPC/networking and the shared server-status S3 bucket. Deploy once per account+region.
+- **Assets** ([`cdk/assets.go`](cdk/assets.go)) - the bucket the game install scripts are published to,
+  with the digest lists a server checks them against.
 - **Fleet** ([`cdk/fleet.go`](cdk/fleet.go)) - what every server shares: the instance role, one Security Group per game, one backup plan, and the schedule that stops idle servers.
 - **Control Panel** ([`cdk/controlpanel.go`](cdk/controlpanel.go)) - Cognito login, control API, start/stop/DNS Lambdas, the CloudFront site.
+
+![AWS resources](docs/architecture-aws.svg)
 
 The servers themselves are created at runtime from the control panel by an admin, not declared in any
 template. Each gets its own EBS data volume, DNS record and join password, and is picked up by the
@@ -33,6 +37,10 @@ Each server also reports live player count, game version, and installed mods to 
 Access is per user, per server, assigned from the control panel's own Access page rather than at deploy time - see [`docs/access.md`](docs/access.md).
 
 The control panel finds the servers it manages by an EC2 tag (`ID_TAG_NAME`/`ID_TAG_VALUE` in its config), applied to every server it creates.
+
+![Lambda classes](docs/architecture-classes.svg)
+
+![Scripts on a game server](docs/architecture-scripts.svg)
 
 ## Deploying
 
