@@ -2,7 +2,7 @@ module personal-game-server-manager/cdk
 
 go 1.25.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/aws/aws-cdk-go/awscdk/v2 v2.253.1

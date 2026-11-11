@@ -2,7 +2,7 @@ module personal-game-server-manager/lambda
 
 go 1.25.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/aws/aws-lambda-go v1.49.0
